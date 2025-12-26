@@ -9,7 +9,8 @@
             <div class="card">
                 <div class="card-header"><h5>Export Configuration</h5></div>
                 <div class="card-body">
-                    <form method="POST">
+                    <form method="POST" id="exportForm">
+                        <!-- Export Type -->
                         <div class="mb-3">
                             <label for="export_type" class="form-label">Export Type</label>
                             <select class="form-select" id="export_type" name="export_type" required>
@@ -20,6 +21,7 @@
                             </select>
                         </div>
                         
+                        <!-- Batch Selection -->
                         <div class="mb-3">
                             <label for="batch_id" class="form-label">Batch (Optional)</label>
                             <select class="form-select" id="batch_id" name="batch_id">
@@ -33,14 +35,84 @@
                             {% endif %}
                         </div>
                         
+                        <!-- Domain Filtering with Limits -->
                         <div class="mb-3">
-                            <label for="filter_domains" class="form-label">Filter by Domains (Optional)</label>
-                            <input type="text" class="form-control" id="filter_domains" name="filter_domains" 
-                                   placeholder="gmail.com,yahoo.com,outlook.com">
-                            <small class="form-text text-muted">Comma-separated list of domains</small>
+                            <label class="form-label">Filter by Domains with Limits</label>
+                            <div class="card">
+                                <div class="card-body">
+                                    {% if domain_stats %}
+                                    <p class="text-muted small">Select domains and specify how many emails to export from each:</p>
+                                    {% for stat in domain_stats %}
+                                    <div class="row mb-2 align-items-center">
+                                        <div class="col-md-1">
+                                            <input type="checkbox" class="form-check-input domain-checkbox" 
+                                                   id="domain_{{ loop.index }}" 
+                                                   data-domain="{{ stat.domain }}"
+                                                   onchange="toggleDomainLimit(this)">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label for="domain_{{ loop.index }}" class="form-check-label">
+                                                <strong>{{ stat.domain }}</strong>
+                                            </label>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <span class="badge bg-info">{{ stat.count }} available</span>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <input type="number" class="form-control form-control-sm domain-limit" 
+                                                   id="limit_{{ stat.domain }}" 
+                                                   placeholder="Limit"
+                                                   min="1" 
+                                                   max="{{ stat.count }}"
+                                                   disabled>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                    {% else %}
+                                    <p class="text-muted">No emails available for export</p>
+                                    {% endif %}
+                                    <input type="hidden" name="domain_limits" id="domain_limits">
+                                </div>
+                            </div>
                         </div>
                         
-                        <button type="submit" class="btn btn-primary">
+                        <!-- Export Format -->
+                        <div class="mb-3">
+                            <label for="export_format" class="form-label">Export Format</label>
+                            <select class="form-select" id="export_format" name="export_format">
+                                <option value="csv">CSV (Full Details)</option>
+                                <option value="txt">TXT (Email List Only)</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Custom Fields (for CSV) -->
+                        <div class="mb-3" id="custom_fields_section">
+                            <label for="custom_fields" class="form-label">Custom CSV Fields (Optional)</label>
+                            <input type="text" class="form-control" id="custom_fields" name="custom_fields" 
+                                   placeholder="email,domain,quality_score,uploaded_at">
+                            <small class="form-text text-muted">
+                                Leave empty for default fields. Available: email, domain, quality_score, uploaded_at, domain_category, is_valid
+                            </small>
+                        </div>
+                        
+                        <!-- File Split Options -->
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="split_files" name="split_files" onchange="toggleSplitSize()">
+                                <label class="form-check-label" for="split_files">
+                                    Split into multiple files
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3" id="split_size_section" style="display: none;">
+                            <label for="split_size" class="form-label">Records per file</label>
+                            <input type="number" class="form-control" id="split_size" name="split_size" 
+                                   value="10000" min="100" max="100000">
+                            <small class="form-text text-muted">Split export into files with this many records each</small>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary" onclick="return prepareDomainLimits()">
                             <i class="bi bi-download"></i> Start Export
                         </button>
                         <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary">Cancel</a>
@@ -59,6 +131,7 @@
                         <li>Emails marked as opted-out</li>
                     </ul>
                     <p><strong>Large exports:</strong> will be processed in the background. You'll be able to download once complete.</p>
+                    <p><strong>Download History:</strong> After export, you can re-download from your <a href="{{ url_for('email.download_history') }}">Download History</a></p>
                 </div>
             </div>
             
@@ -71,4 +144,55 @@
         </div>
     </div>
 </div>
+
+<script>
+function toggleDomainLimit(checkbox) {
+    const domain = checkbox.dataset.domain;
+    const limitInput = document.getElementById('limit_' + domain);
+    limitInput.disabled = !checkbox.checked;
+    if (!checkbox.checked) {
+        limitInput.value = '';
+    }
+}
+
+function toggleSplitSize() {
+    const splitFiles = document.getElementById('split_files').checked;
+    document.getElementById('split_size_section').style.display = splitFiles ? 'block' : 'none';
+}
+
+function prepareDomainLimits() {
+    const checkboxes = document.querySelectorAll('.domain-checkbox:checked');
+    const limits = [];
+    let hasError = false;
+    
+    checkboxes.forEach(cb => {
+        const domain = cb.dataset.domain;
+        const limitInput = document.getElementById('limit_' + domain);
+        const limit = limitInput.value;
+        
+        if (!limit || limit <= 0) {
+            // If checkbox is selected but no valid limit, show error
+            alert('Please enter a valid limit for ' + domain + ' or uncheck the domain');
+            hasError = true;
+            return false;
+        }
+        
+        limits.push(domain + ':' + limit);
+    });
+    
+    if (hasError) {
+        event.preventDefault();
+        return false;
+    }
+    
+    document.getElementById('domain_limits').value = limits.join(',');
+    return true;
+}
+
+// Hide custom fields when TXT format is selected
+document.getElementById('export_format').addEventListener('change', function() {
+    const customFieldsSection = document.getElementById('custom_fields_section');
+    customFieldsSection.style.display = this.value === 'csv' ? 'block' : 'none';
+});
+</script>
 {% endblock %}
