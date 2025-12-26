@@ -189,9 +189,10 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
             raise
 
 @shared_task(bind=True)
-def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=False):
+@shared_task(bind=True)
+def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=False, check_disposable=True):
     """
-    Validate emails in a batch.
+    Validate emails in a batch with enhanced validation.
     Job-driven with progress reporting.
     """
     from app import create_app
@@ -214,6 +215,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
             
             job.status = 'running'
             job.started_at = datetime.utcnow()
+            db.session.commit()
             
             batch = Batch.query.get(batch_id)
             if not batch:
@@ -230,31 +232,29 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
             valid_count = 0
             invalid_count = 0
             
+            from app.utils.email_validator import validate_email_enhanced
+            
             for idx, email_obj in enumerate(emails):
                 try:
-                    # Validate
-                    is_valid, error_type, error_message = validate_email_full(
+                    # Enhanced validation with quality scoring
+                    is_valid, error_type, error_message, quality_score, details = validate_email_enhanced(
                         email_obj.email,
                         check_dns=check_dns,
+                        check_smtp=False,  # SMTP check is slow, keep disabled
                         check_role=check_role,
+                        check_disposable=check_disposable,
                         ignore_domains=ignore_domains
                     )
                     
                     email_obj.is_validated = True
                     email_obj.is_valid = is_valid
+                    email_obj.quality_score = quality_score
                     
                     if not is_valid:
-                        email_obj.validation_error = error_message
+                        email_obj.validation_error = f'{error_type}: {error_message}'
                         invalid_count += 1
                     else:
                         valid_count += 1
-                        # Calculate quality score (simple heuristic)
-                        score = 70
-                        if check_dns and email_obj.domain:
-                            from app.utils.email_validator import check_dns_mx
-                            if check_dns_mx(email_obj.domain):
-                                score += 20
-                        email_obj.quality_score = min(100, score)
                     
                     # Update progress every 50 emails
                     if (idx + 1) % 50 == 0:
@@ -275,6 +275,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                     email_obj.is_validated = True
                     email_obj.is_valid = False
                     email_obj.validation_error = f'Validation error: {str(e)}'
+                    email_obj.quality_score = 0
                     invalid_count += 1
             
             # Final commit

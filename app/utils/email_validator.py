@@ -189,3 +189,171 @@ def validate_email_full(email, check_dns=False, check_role=False, ignore_domains
             return False, 'no_mx_record', 'No MX record found for domain'
     
     return True, None, None
+
+# Common disposable email domains
+DISPOSABLE_DOMAINS = {
+    'tempmail.com', '10minutemail.com', 'guerrillamail.com', 'mailinator.com',
+    'throwaway.email', 'trashmail.com', 'getnada.com', 'temp-mail.org',
+    'yopmail.com', 'fakeinbox.com', 'maildrop.cc', 'getairmail.com',
+    'sharklasers.com', 'spam4.me', 'tmpeml.info', 'dispostable.com',
+    'mintemail.com', 'emailondeck.com', 'guerrillamail.info', 'guerrillamail.net'
+}
+
+def is_disposable_email(email):
+    """
+    Check if email is from a disposable/temporary email service
+    Returns (is_disposable, domain)
+    """
+    domain = extract_domain(email)
+    if not domain:
+        return False, None
+    
+    domain_lower = domain.lower()
+    
+    # Check against known disposable domains
+    if domain_lower in DISPOSABLE_DOMAINS:
+        return True, domain_lower
+    
+    # Check for common disposable patterns
+    disposable_patterns = ['temp', 'trash', 'fake', 'throwaway', 'disposable', 'guerrilla']
+    for pattern in disposable_patterns:
+        if pattern in domain_lower:
+            return True, domain_lower
+    
+    return False, None
+
+def calculate_email_quality_score(email, is_valid=None, has_mx=None, is_role=None, 
+                                  is_disposable=None, domain_category=None):
+    """
+    Calculate email quality score (0-100)
+    
+    Scoring criteria:
+    - Valid syntax: +30
+    - Has MX record: +20
+    - Not role-based: +15
+    - Not disposable: +15
+    - Top domain: +10, Mixed: +5
+    - Valid flag: +10
+    """
+    score = 0
+    
+    # Base score for valid syntax (always given if we're scoring)
+    score += 30
+    
+    # MX record check
+    if has_mx is True:
+        score += 20
+    elif has_mx is False:
+        score -= 10
+    
+    # Role-based check
+    if is_role is False:
+        score += 15
+    elif is_role is True:
+        score -= 5
+    
+    # Disposable check
+    if is_disposable is False:
+        score += 15
+    elif is_disposable is True:
+        score -= 20
+    
+    # Domain category
+    if domain_category and domain_category != 'mixed':
+        score += 10  # Top domain
+    elif domain_category == 'mixed':
+        score += 5
+    
+    # Validation status
+    if is_valid is True:
+        score += 10
+    elif is_valid is False:
+        score -= 15
+    
+    # Ensure score is between 0 and 100
+    return max(0, min(100, score))
+
+def validate_email_enhanced(email, check_dns=False, check_smtp=False, check_role=False, 
+                           check_disposable=True, ignore_domains=None):
+    """
+    Enhanced email validation with quality scoring
+    Returns (is_valid, error_type, error_message, quality_score, details)
+    """
+    details = {
+        'has_mx': None,
+        'is_role': None,
+        'is_disposable': None,
+        'domain_category': None
+    }
+    
+    # Syntax check
+    is_valid_syntax, syntax_error = is_valid_email_syntax(email)
+    if not is_valid_syntax:
+        quality_score = calculate_email_quality_score(email, is_valid=False)
+        return False, 'invalid_syntax', syntax_error, quality_score, details
+    
+    # Extract domain
+    domain = extract_domain(email)
+    if not domain:
+        quality_score = calculate_email_quality_score(email, is_valid=False)
+        return False, 'invalid_format', 'Could not extract domain', quality_score, details
+    
+    # Domain category
+    details['domain_category'] = classify_domain(domain)
+    
+    # Check ignore domains
+    if ignore_domains and domain.lower() in [d.lower() for d in ignore_domains]:
+        quality_score = calculate_email_quality_score(email, is_valid=False, 
+                                                      domain_category=details['domain_category'])
+        return False, 'ignore_domain', f'Domain {domain} is in ignore list', quality_score, details
+    
+    # Check US-only ccTLD policy
+    allowed, reason = check_us_only_cctld_policy(email)
+    if not allowed:
+        quality_score = calculate_email_quality_score(email, is_valid=False,
+                                                      domain_category=details['domain_category'])
+        if 'ccTLD' in reason:
+            return False, 'cctld_policy', reason, quality_score, details
+        elif 'Policy suffix' in reason:
+            return False, 'policy_suffix', reason, quality_score, details
+    
+    # Check disposable email
+    if check_disposable:
+        is_disp, disp_domain = is_disposable_email(email)
+        details['is_disposable'] = is_disp
+        if is_disp:
+            quality_score = calculate_email_quality_score(email, is_valid=False, 
+                                                          is_disposable=True,
+                                                          domain_category=details['domain_category'])
+            return False, 'disposable_email', f'Disposable email domain: {disp_domain}', quality_score, details
+    else:
+        details['is_disposable'] = False
+    
+    # Check role-based email
+    details['is_role'] = is_role_based_email(email)
+    if check_role and details['is_role']:
+        quality_score = calculate_email_quality_score(email, is_valid=False,
+                                                      is_role=True,
+                                                      is_disposable=details['is_disposable'],
+                                                      domain_category=details['domain_category'])
+        return False, 'role_based', 'Role-based email address', quality_score, details
+    
+    # DNS/MX check
+    if check_dns:
+        details['has_mx'] = check_dns_mx(domain)
+        if not details['has_mx']:
+            quality_score = calculate_email_quality_score(email, is_valid=False,
+                                                          has_mx=False,
+                                                          is_role=details['is_role'],
+                                                          is_disposable=details['is_disposable'],
+                                                          domain_category=details['domain_category'])
+            return False, 'no_mx_record', 'No MX record found for domain', quality_score, details
+    
+    # Calculate final quality score for valid email
+    quality_score = calculate_email_quality_score(email, is_valid=True,
+                                                  has_mx=details.get('has_mx'),
+                                                  is_role=details['is_role'],
+                                                  is_disposable=details['is_disposable'],
+                                                  domain_category=details['domain_category'])
+    
+    return True, None, None, quality_score, details
