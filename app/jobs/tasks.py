@@ -254,8 +254,6 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                             from app.utils.email_validator import check_dns_mx
                             if check_dns_mx(email_obj.domain):
                                 score += 20
-                        if not is_role_based_email(email_obj.email):
-                            score += 10
                         email_obj.quality_score = min(100, score)
                     
                     # Update progress every 50 emails
@@ -444,8 +442,3 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
             if job:
                 job.fail(str(e))
             raise
-
-def is_role_based_email(email):
-    """Check if email is role-based"""
-    from app.utils.email_validator import is_role_based_email as check_role
-    return check_role(email)

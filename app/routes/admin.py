@@ -8,6 +8,7 @@ from app.utils.decorators import admin_required
 from app.utils.helpers import log_activity
 from sqlalchemy import desc, func
 from datetime import datetime
+import os
 
 bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -278,5 +279,3 @@ def activity_logs():
     )
     
     return render_template('admin/activity_logs.html', pagination=pagination)
-
-import os
