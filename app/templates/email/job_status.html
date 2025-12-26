@@ -1,6 +1,7 @@
 {% extends "layouts/base.html" %}
 {% block title %}Job Status{% endblock %}
 {% block content %}
+{% set show_download = job.status == 'completed' and job.job_type == 'export' and job.result_data and job.result_data.history_id %}
 <div class="container mt-4">
     <h2><i class="bi bi-gear-fill"></i> Job Status</h2>
     <div class="card mt-4">
@@ -18,7 +19,7 @@
             {% if job.result_message %}<p><strong>Result:</strong> {{ job.result_message }}</p>{% endif %}
             {% if job.error_message %}<div class="alert alert-danger">{{ job.error_message }}</div>{% endif %}
             
-            {% if job.status == 'completed' and job.job_type == 'export' and job.result_data and job.result_data.history_id %}
+            {% if show_download %}
             <div class="alert alert-success mt-3">
                 <i class="bi bi-check-circle-fill"></i> Export completed successfully! You can download the file now.
             </div>
@@ -29,7 +30,7 @@
                 {% if job.batch_id %}
                 <a href="{{ url_for('email.batch_detail', batch_id=job.batch_id) }}" class="btn btn-primary">View Batch</a>
                 {% endif %}
-                {% if job.status == 'completed' and job.job_type == 'export' and job.result_data and job.result_data.history_id %}
+                {% if show_download %}
                 <a href="{{ url_for('email.download_export', history_id=job.result_data.history_id) }}" class="btn btn-success">
                     <i class="bi bi-download"></i> Download Export
                 </a>
