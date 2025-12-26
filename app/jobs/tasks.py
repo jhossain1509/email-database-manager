@@ -1,12 +1,13 @@
 from celery import shared_task
 from app import db
 from app.models.email import Email, Batch, RejectedEmail, IgnoreDomain, SuppressionList
-from app.models.job import Job, DomainReputation
+from app.models.job import Job, DomainReputation, DownloadHistory
 from app.utils.email_validator import (
     validate_email_full, extract_domain, classify_domain
 )
 import csv
 import os
+import zipfile
 from datetime import datetime
 from flask import current_app
 
@@ -71,14 +72,15 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
                     # Check for duplicates in current batch
                     if email in seen_emails:
                         duplicate_count += 1
-                        RejectedEmail(
+                        rejected = RejectedEmail(
                             email=email,
                             domain=extract_domain(email) or 'unknown',
                             reason='duplicate',
                             details='Duplicate in current batch',
                             batch_id=batch_id,
                             job_id=job.id
-                        ).save()
+                        )
+                        db.session.add(rejected)
                         continue
                     
                     seen_emails.add(email)
@@ -86,14 +88,15 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
                     # Check if in suppression list
                     if email in suppressed_emails:
                         rejected_count += 1
-                        RejectedEmail(
+                        rejected = RejectedEmail(
                             email=email,
                             domain=extract_domain(email) or 'unknown',
                             reason='suppressed',
                             details='Email in suppression list',
                             batch_id=batch_id,
                             job_id=job.id
-                        ).save()
+                        )
+                        db.session.add(rejected)
                         continue
                     
                     # Validate with all filters
@@ -298,6 +301,143 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                 'status': 'completed',
                 'valid': valid_count,
                 'invalid': invalid_count
+            }
+            
+        except Exception as e:
+            if job:
+                job.fail(str(e))
+            raise
+
+@shared_task(bind=True)
+def export_emails_task(self, user_id, export_type='verified', batch_id=None, filter_domains=None):
+    """
+    Export emails with filtering.
+    Job-driven with progress reporting.
+    """
+    from app import create_app
+    app = create_app()
+    
+    with app.app_context():
+        try:
+            # Get or create job record
+            job = Job.query.filter_by(job_id=self.request.id).first()
+            if not job:
+                job = Job(
+                    job_id=self.request.id,
+                    job_type='export',
+                    user_id=user_id,
+                    batch_id=batch_id,
+                    status='running'
+                )
+                db.session.add(job)
+                db.session.commit()
+            
+            job.status = 'running'
+            job.started_at = datetime.utcnow()
+            
+            # Build query
+            query = Email.query
+            
+            if batch_id:
+                query = query.filter_by(batch_id=batch_id)
+            
+            if export_type == 'verified':
+                query = query.filter_by(is_validated=True, is_valid=True)
+            elif export_type == 'unverified':
+                query = query.filter_by(is_validated=False)
+            elif export_type == 'invalid':
+                query = query.filter_by(is_validated=True, is_valid=False)
+            
+            if filter_domains:
+                query = query.filter(Email.domain.in_(filter_domains))
+            
+            # Get suppression list
+            suppressed = set([s.email for s in SuppressionList.query.all()])
+            
+            emails = query.all()
+            job.total = len(emails)
+            db.session.commit()
+            
+            # Create export file
+            export_folder = app.config['EXPORT_FOLDER']
+            os.makedirs(export_folder, exist_ok=True)
+            
+            timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+            filename = f"export_{export_type}_{user_id}_{timestamp}.csv"
+            file_path = os.path.join(export_folder, filename)
+            
+            exported_count = 0
+            
+            with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['Email', 'Domain', 'Quality Score', 'Uploaded At'])
+                
+                for idx, email_obj in enumerate(emails):
+                    # Skip suppressed emails
+                    if email_obj.email in suppressed:
+                        continue
+                    
+                    writer.writerow([
+                        email_obj.email,
+                        email_obj.domain,
+                        email_obj.quality_score or '',
+                        email_obj.uploaded_at.strftime('%Y-%m-%d %H:%M:%S')
+                    ])
+                    
+                    # Mark as downloaded
+                    email_obj.downloaded = True
+                    email_obj.download_count += 1
+                    exported_count += 1
+                    
+                    if (idx + 1) % 100 == 0:
+                        job.update_progress(idx + 1)
+                        db.session.commit()
+                        
+                        self.update_state(
+                            state='PROGRESS',
+                            meta={
+                                'current': idx + 1,
+                                'total': job.total,
+                                'percent': job.progress_percent
+                            }
+                        )
+            
+            db.session.commit()
+            
+            # Get file size
+            file_size = os.path.getsize(file_path)
+            
+            # Create download history
+            history = DownloadHistory(
+                user_id=user_id,
+                batch_id=batch_id,
+                download_type=export_type,
+                filter_domains=','.join(filter_domains) if filter_domains else None,
+                filename=filename,
+                file_path=file_path,
+                file_size=file_size,
+                record_count=exported_count
+            )
+            db.session.add(history)
+            db.session.commit()
+            
+            # Complete job
+            job.complete(
+                message=f'Exported {exported_count} emails',
+                result_data={
+                    'exported': exported_count,
+                    'filename': filename,
+                    'file_path': file_path,
+                    'history_id': history.id
+                }
+            )
+            
+            return {
+                'status': 'completed',
+                'exported': exported_count,
+                'filename': filename,
+                'file_path': file_path,
+                'history_id': history.id
             }
             
         except Exception as e:

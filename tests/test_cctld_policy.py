@@ -1,7 +1,11 @@
 import pytest
+import os
 from app import create_app, db
 from app.models.user import User
 from app.utils.email_validator import check_us_only_cctld_policy, extract_domain
+
+# Set test database URL before importing app
+os.environ['DATABASE_URL'] = 'sqlite:///:memory:'
 
 @pytest.fixture
 def app():

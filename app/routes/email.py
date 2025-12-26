@@ -4,7 +4,7 @@ from werkzeug.utils import secure_filename
 from app import db
 from app.models.email import Email, Batch, RejectedEmail
 from app.models.job import Job, DownloadHistory
-from app.jobs.tasks import import_emails_task, validate_emails_task
+from app.jobs.tasks import import_emails_task, validate_emails_task, export_emails_task
 from app.utils.helpers import log_activity
 from app.utils.decorators import guest_cannot_access_main_db
 import os
@@ -276,3 +276,83 @@ def download_rejected(batch_id):
     log_activity('download', f'Downloaded rejected emails for batch: {batch.name}', 'batch', batch.id)
     
     return send_file(file_path, as_attachment=True, download_name=filename)
+
+@bp.route('/export', methods=['GET', 'POST'])
+@login_required
+def export():
+    """Export emails"""
+    if request.method == 'POST':
+        export_type = request.form.get('export_type', 'verified')
+        batch_id = request.form.get('batch_id', type=int)
+        filter_domains_str = request.form.get('filter_domains', '').strip()
+        
+        # Parse filter domains
+        filter_domains = None
+        if filter_domains_str:
+            filter_domains = [d.strip() for d in filter_domains_str.split(',') if d.strip()]
+        
+        # Check batch access for guest users
+        if batch_id:
+            batch = Batch.query.get(batch_id)
+            if batch and current_user.is_guest() and batch.user_id != current_user.id:
+                flash('Access denied.', 'danger')
+                return redirect(request.url)
+        
+        # Guest users can only export from their own batches
+        if current_user.is_guest() and not batch_id:
+            flash('Guest users must select a specific batch to export.', 'warning')
+            return redirect(request.url)
+        
+        # Start export job
+        task = export_emails_task.delay(
+            current_user.id,
+            export_type,
+            batch_id,
+            filter_domains
+        )
+        
+        # Create job record
+        job = Job(
+            job_id=task.id,
+            job_type='export',
+            user_id=current_user.id,
+            batch_id=batch_id,
+            status='pending'
+        )
+        db.session.add(job)
+        db.session.commit()
+        
+        log_activity('export', f'Started export: {export_type}', 'job', job.id)
+        
+        flash(f'Export started! Job ID: {task.id}', 'success')
+        return redirect(url_for('email.job_status', job_id=task.id))
+    
+    # Get batches for selection
+    if current_user.is_guest():
+        user_batches = Batch.query.filter_by(user_id=current_user.id).all()
+    elif current_user.is_admin():
+        user_batches = Batch.query.all()
+    else:
+        user_batches = Batch.query.filter_by(user_id=current_user.id).all()
+    
+    return render_template('email/export.html', batches=user_batches)
+
+@bp.route('/download/<int:history_id>')
+@login_required
+def download_export(history_id):
+    """Download exported file from history"""
+    history = DownloadHistory.query.get_or_404(history_id)
+    
+    # Check access
+    if not current_user.is_admin() and history.user_id != current_user.id:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('dashboard.index'))
+    
+    # Check if file exists
+    if not os.path.exists(history.file_path):
+        flash('File no longer exists.', 'danger')
+        return redirect(url_for('dashboard.index'))
+    
+    log_activity('download', f'Downloaded export: {history.filename}', 'download_history', history.id)
+    
+    return send_file(history.file_path, as_attachment=True, download_name=history.filename)

@@ -56,31 +56,46 @@ def is_cctld(domain):
     Returns (is_cctld, tld)
     """
     try:
-        # Get the public suffix
-        public_suffix = psl.get_public_suffix(domain)
-        if not public_suffix:
+        # Extract the TLD (last part after final dot)
+        domain_lower = domain.lower()
+        parts = domain_lower.split('.')
+        
+        if len(parts) < 2:
             return False, None
         
-        # Get TLD (last part)
-        tld = '.' + public_suffix
+        # Get TLD
+        tld = '.' + parts[-1]
         
-        # Check if it's a generic TLD
+        # Check if it's in generic TLDs list
         generic_tlds = current_app.config.get('GENERIC_TLDS', [])
         if tld in generic_tlds:
             return False, tld
         
-        # Check for multi-level public suffixes (like .co.uk, .com.au)
-        # These are ccTLDs
-        parts = public_suffix.split('.')
-        if len(parts) > 1:
+        # Check for multi-level TLDs like .co.uk, .com.au
+        if len(parts) >= 3:
+            # Check common multi-level patterns
+            second_last = parts[-2]
+            multi_level_tld = f'.{second_last}{tld}'
+            
+            # Known multi-level ccTLDs
+            multi_level_cctlds = [
+                '.co.uk', '.com.au', '.co.nz', '.co.za', '.com.br',
+                '.co.jp', '.co.in', '.co.kr', '.com.cn', '.com.mx',
+                '.com.ar', '.com.co', '.ac.uk', '.gov.uk', '.org.uk'
+            ]
+            
+            if multi_level_tld in multi_level_cctlds:
+                return True, multi_level_tld
+            
+            # Check if it ends with .us (multi-level like .co.us is OK)
+            if tld == '.us':
+                return False, multi_level_tld
+        
+        # Single-level TLD: check if it's 2 characters (typical ccTLD)
+        if len(parts[-1]) == 2:
             return True, tld
         
-        # Check if last part is 2 characters (typical ccTLD)
-        last_part = parts[-1]
-        if len(last_part) == 2:
-            return True, '.' + last_part
-        
-        # Otherwise, assume it's a generic/new gTLD
+        # Otherwise treat as generic gTLD
         return False, tld
     except:
         return False, None
