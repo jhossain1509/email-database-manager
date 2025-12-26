@@ -10,8 +10,9 @@ class Config:
     
     # Upload settings
     MAX_CONTENT_LENGTH = int(os.environ.get('MAX_CONTENT_LENGTH', 104857600))  # 100MB
-    UPLOAD_FOLDER = os.environ.get('UPLOAD_FOLDER', 'uploads')
-    EXPORT_FOLDER = os.environ.get('EXPORT_FOLDER', 'exports')
+    # Use absolute paths to avoid path resolution issues
+    UPLOAD_FOLDER = os.path.abspath(os.environ.get('UPLOAD_FOLDER', 'uploads'))
+    EXPORT_FOLDER = os.path.abspath(os.environ.get('EXPORT_FOLDER', 'exports'))
     
     # Session settings
     SESSION_TYPE = 'filesystem'
