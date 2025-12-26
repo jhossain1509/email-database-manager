@@ -1,0 +1,63 @@
+{% extends "layouts/base.html" %}
+{% block title %}Admin Dashboard{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+    <h2><i class="bi bi-shield"></i> Admin Dashboard</h2>
+    <div class="row mt-4">
+        <div class="col-md-3">
+            <div class="card stat-card mb-3">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Total Users</h6>
+                    <h3 class="card-title">{{ total_users }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card mb-3" style="border-left-color: #198754;">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Total Emails</h6>
+                    <h3 class="card-title text-success">{{ total_emails }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card mb-3" style="border-left-color: #ffc107;">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Total Batches</h6>
+                    <h3 class="card-title text-warning">{{ total_batches }}</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header"><h5>Users by Role</h5></div>
+                <div class="card-body">
+                    <table class="table">
+                        <tbody>
+                            {% for role, count in user_roles %}
+                            <tr><td>{{ role }}</td><td><strong>{{ count }}</strong></td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header"><h5>Recent Users</h5></div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <tbody>
+                            {% for user in recent_users %}
+                            <tr><td>{{ user.username }}</td><td><span class="badge bg-primary">{{ user.role }}</span></td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

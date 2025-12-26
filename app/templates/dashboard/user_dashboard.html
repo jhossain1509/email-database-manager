@@ -1,0 +1,249 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <h2><i class="bi bi-speedometer2"></i> Dashboard</h2>
+    <p class="text-muted">
+        {% if current_user.is_admin() %}
+        Admin View - System-wide statistics and data
+        {% else %}
+        {{ current_user.role|title }} User - Main database access
+        {% endif %}
+    </p>
+    
+    <div class="row mt-4">
+        <div class="col-md-2">
+            <div class="card stat-card mb-3">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Total Uploaded</h6>
+                    <h3 class="card-title">{{ stats.total_uploaded }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card stat-card mb-3" style="border-left-color: #198754;">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Verified</h6>
+                    <h3 class="card-title text-success">{{ stats.total_verified }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card stat-card mb-3" style="border-left-color: #ffc107;">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Unverified</h6>
+                    <h3 class="card-title text-warning">{{ stats.total_unverified }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card stat-card mb-3" style="border-left-color: #17a2b8;">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Downloaded</h6>
+                    <h3 class="card-title text-info">{{ stats.total_downloaded }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card stat-card mb-3" style="border-left-color: #6f42c1;">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Available</h6>
+                    <h3 class="card-title" style="color: #6f42c1;">{{ stats.available_download }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card stat-card mb-3" style="border-left-color: #dc3545;">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Rejected</h6>
+                    <h3 class="card-title text-danger">{{ stats.total_rejected }}</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="bi bi-clock-history"></i> Recent Jobs</h5>
+                </div>
+                <div class="card-body">
+                    {% if recent_jobs %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>User</th>
+                                    <th>Status</th>
+                                    <th>Progress</th>
+                                    <th>Date</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for job in recent_jobs %}
+                                <tr>
+                                    <td><span class="badge bg-secondary">{{ job.job_type }}</span></td>
+                                    <td>{{ job.user.username }}</td>
+                                    <td>
+                                        {% if job.status == 'completed' %}
+                                        <span class="badge bg-success">{{ job.status }}</span>
+                                        {% elif job.status == 'failed' %}
+                                        <span class="badge bg-danger">{{ job.status }}</span>
+                                        {% elif job.status == 'running' %}
+                                        <span class="badge bg-primary">{{ job.status }}</span>
+                                        {% else %}
+                                        <span class="badge bg-warning">{{ job.status }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ job.progress_percent|round(1) }}%</td>
+                                    <td>{{ job.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                    <td>
+                                        <a href="{{ url_for('email.job_status', job_id=job.job_id) }}" class="btn btn-sm btn-outline-primary">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No recent jobs.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="bi bi-pie-chart"></i> Top Domains</h5>
+                </div>
+                <div class="card-body">
+                    {% if top_domains %}
+                    <canvas id="domainChart"></canvas>
+                    {% else %}
+                    <p class="text-muted">No domain data available.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="bi bi-activity"></i> Recent Activity</h5>
+                </div>
+                <div class="card-body">
+                    {% if recent_activities %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>Action</th>
+                                    <th>Description</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for activity in recent_activities[:10] %}
+                                <tr>
+                                    <td>{{ activity.user.username }}</td>
+                                    <td><span class="badge bg-info">{{ activity.action }}</span></td>
+                                    <td>{{ activity.description[:50] if activity.description else '-' }}</td>
+                                    <td>{{ activity.created_at.strftime('%m-%d %H:%M') }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No recent activity.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="bi bi-folder"></i> Recent Batches</h5>
+                </div>
+                <div class="card-body">
+                    {% if batches %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Owner</th>
+                                    <th>Status</th>
+                                    <th>Total</th>
+                                    <th>Valid</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for batch in batches %}
+                                <tr>
+                                    <td>{{ batch.name }}</td>
+                                    <td>{{ batch.owner.username }}</td>
+                                    <td><span class="badge bg-info">{{ batch.status }}</span></td>
+                                    <td>{{ batch.total_count }}</td>
+                                    <td><span class="text-success">{{ batch.valid_count }}</span></td>
+                                    <td>
+                                        <a href="{{ url_for('email.batch_detail', batch_id=batch.id) }}" class="btn btn-sm btn-primary">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No batches available.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if top_domains %}
+<script>
+    const ctx = document.getElementById('domainChart');
+    new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: [{% for domain, count in top_domains %}'{{ domain }}'{% if not loop.last %}, {% endif %}{% endfor %}],
+            datasets: [{
+                data: [{% for domain, count in top_domains %}{{ count }}{% if not loop.last %}, {% endif %}{% endfor %}],
+                backgroundColor: [
+                    '#0d6efd', '#6610f2', '#6f42c1', '#d63384', '#dc3545',
+                    '#fd7e14', '#ffc107', '#198754', '#20c997', '#0dcaf0', '#6c757d'
+                ]
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                }
+            }
+        }
+    });
+</script>
+{% endif %}
+{% endblock %}

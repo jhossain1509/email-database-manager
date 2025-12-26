@@ -1,0 +1,52 @@
+{% extends "layouts/base.html" %}
+{% block title %}Admin - Users{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+    <h2><i class="bi bi-people"></i> User Management</h2>
+    <div class="mt-3">
+        <a href="{{ url_for('admin.create_user') }}" class="btn btn-primary mb-3">
+            <i class="bi bi-person-plus"></i> Create New User
+        </a>
+        {% if users %}
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr>
+                        <td>{{ user.username }}</td>
+                        <td>{{ user.email }}</td>
+                        <td><span class="badge bg-primary">{{ user.role }}</span></td>
+                        <td>
+                            {% if user.is_active %}
+                            <span class="badge bg-success">Active</span>
+                            {% else %}
+                            <span class="badge bg-danger">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ user.created_at.strftime('%Y-%m-%d') }}</td>
+                        <td>
+                            <a href="{{ url_for('admin.edit_user', user_id=user.id) }}" class="btn btn-sm btn-primary">
+                                <i class="bi bi-pencil"></i> Edit
+                            </a>
+                            {% if user.id != current_user.id %}
+                            <form method="POST" action="{{ url_for('admin.delete_user', user_id=user.id) }}" style="display:inline;">
+                                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete user?')">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No users found.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

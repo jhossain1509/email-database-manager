@@ -1,0 +1,35 @@
+{% extends "layouts/base.html" %}
+{% block title %}Job Status{% endblock %}
+{% block content %}
+<div class="container mt-4">
+    <h2><i class="bi bi-gear-fill"></i> Job Status</h2>
+    <div class="card mt-4">
+        <div class="card-header"><h5>Job: {{ job.job_type|title }}</h5></div>
+        <div class="card-body">
+            <p><strong>Status:</strong> 
+                <span class="badge bg-{{ 'success' if job.status == 'completed' else 'primary' if job.status == 'running' else 'danger' if job.status == 'failed' else 'warning' }}">
+                    {{ job.status|upper }}
+                </span>
+            </p>
+            <p><strong>Progress:</strong> {{ job.processed }} / {{ job.total }} ({{ job.progress_percent|round(1) }}%)</p>
+            <div class="progress mb-3">
+                <div class="progress-bar" role="progressbar" style="width: {{ job.progress_percent }}%"></div>
+            </div>
+            {% if job.result_message %}<p><strong>Result:</strong> {{ job.result_message }}</p>{% endif %}
+            {% if job.error_message %}<div class="alert alert-danger">{{ job.error_message }}</div>{% endif %}
+            <div class="mt-3">
+                <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary">Back to Dashboard</a>
+                {% if job.batch_id %}
+                <a href="{{ url_for('email.batch_detail', batch_id=job.batch_id) }}" class="btn btn-primary">View Batch</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    // Auto-refresh if job is running
+    {% if job.status in ['pending', 'running'] %}
+    setTimeout(() => location.reload(), 3000);
+    {% endif %}
+</script>
+{% endblock %}

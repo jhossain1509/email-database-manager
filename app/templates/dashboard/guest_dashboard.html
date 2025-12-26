@@ -1,0 +1,192 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}Guest Dashboard{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <h2><i class="bi bi-speedometer2"></i> My Dashboard</h2>
+    <p class="text-muted">Guest User - You can only view and manage your own uploads.</p>
+    
+    <div class="row mt-4">
+        <div class="col-md-3">
+            <div class="card stat-card mb-3">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Total Uploaded</h6>
+                    <h3 class="card-title">{{ stats.total_uploaded }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card mb-3" style="border-left-color: #198754;">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Verified</h6>
+                    <h3 class="card-title text-success">{{ stats.total_verified }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card mb-3" style="border-left-color: #ffc107;">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Unverified</h6>
+                    <h3 class="card-title text-warning">{{ stats.total_unverified }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card mb-3" style="border-left-color: #dc3545;">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Rejected</h6>
+                    <h3 class="card-title text-danger">{{ stats.total_rejected }}</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row mt-4">
+        <div class="col-md-3">
+            <div class="card stat-card mb-3" style="border-left-color: #17a2b8;">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Downloaded</h6>
+                    <h3 class="card-title text-info">{{ stats.total_downloaded }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card mb-3" style="border-left-color: #6f42c1;">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">Available for Download</h6>
+                    <h3 class="card-title" style="color: #6f42c1;">{{ stats.available_download }}</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="bi bi-clock-history"></i> Recent Jobs</h5>
+                </div>
+                <div class="card-body">
+                    {% if recent_jobs %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Progress</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for job in recent_jobs %}
+                                <tr>
+                                    <td><span class="badge bg-secondary">{{ job.job_type }}</span></td>
+                                    <td>
+                                        {% if job.status == 'completed' %}
+                                        <span class="badge bg-success">{{ job.status }}</span>
+                                        {% elif job.status == 'failed' %}
+                                        <span class="badge bg-danger">{{ job.status }}</span>
+                                        {% elif job.status == 'running' %}
+                                        <span class="badge bg-primary">{{ job.status }}</span>
+                                        {% else %}
+                                        <span class="badge bg-warning">{{ job.status }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ job.progress_percent|round(1) }}%</td>
+                                    <td>{{ job.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No recent jobs.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="bi bi-pie-chart"></i> Top Domains</h5>
+                </div>
+                <div class="card-body">
+                    {% if top_domains %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Domain</th>
+                                    <th>Count</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for domain, count in top_domains %}
+                                <tr>
+                                    <td>{{ domain }}</td>
+                                    <td>{{ count }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No domain data available.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="bi bi-folder"></i> My Batches</h5>
+                </div>
+                <div class="card-body">
+                    {% if batches %}
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Status</th>
+                                    <th>Total</th>
+                                    <th>Valid</th>
+                                    <th>Invalid</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for batch in batches %}
+                                <tr>
+                                    <td>{{ batch.name }}</td>
+                                    <td><span class="badge bg-info">{{ batch.status }}</span></td>
+                                    <td>{{ batch.total_count }}</td>
+                                    <td><span class="text-success">{{ batch.valid_count }}</span></td>
+                                    <td><span class="text-danger">{{ batch.invalid_count }}</span></td>
+                                    <td>{{ batch.created_at.strftime('%Y-%m-%d') }}</td>
+                                    <td>
+                                        <a href="{{ url_for('email.batch_detail', batch_id=batch.id) }}" class="btn btn-sm btn-primary">
+                                            <i class="bi bi-eye"></i> View
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No batches uploaded yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

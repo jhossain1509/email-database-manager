@@ -1,0 +1,86 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}Upload Emails{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2><i class="bi bi-upload"></i> Upload Email List</h2>
+    
+    <div class="row mt-4">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Upload CSV/TXT File</h5>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>File Format:</strong> CSV or TXT file with one email address per line.
+                        The file will be processed with US-only ccTLD filtering and ignore domain rules.
+                    </div>
+                    
+                    <form method="POST" enctype="multipart/form-data">
+                        <div class="mb-3">
+                            <label for="batch_name" class="form-label">Batch Name</label>
+                            <input type="text" class="form-control" id="batch_name" name="batch_name" 
+                                   placeholder="Optional - auto-generated if empty">
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="file" class="form-label">Email File</label>
+                            <input type="file" class="form-control" id="file" name="file" accept=".csv,.txt" required>
+                            <small class="form-text text-muted">Accepted formats: CSV, TXT (Max 100MB)</small>
+                        </div>
+                        
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="consent_granted" name="consent_granted" required>
+                            <label class="form-check-label" for="consent_granted">
+                                <strong>I confirm that I have consent to process these email addresses</strong>
+                            </label>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-upload"></i> Upload and Import
+                        </button>
+                        <a href="{{ url_for('email.batches') }}" class="btn btn-secondary">
+                            <i class="bi bi-arrow-left"></i> Cancel
+                        </a>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Import Rules</h5>
+                </div>
+                <div class="card-body">
+                    <h6>Filtering Applied:</h6>
+                    <ul>
+                        <li><strong>US-only ccTLD:</strong> Only .us ccTLD allowed, all others rejected</li>
+                        <li><strong>Generic TLDs:</strong> .com, .net, .org, etc. allowed</li>
+                        <li><strong>Policy Suffixes:</strong> .gov, .edu blocked</li>
+                        <li><strong>Ignore Domains:</strong> Admin-defined list</li>
+                        <li><strong>Duplicates:</strong> Detected and rejected</li>
+                        <li><strong>Suppression List:</strong> Opt-outs excluded</li>
+                    </ul>
+                    
+                    <h6 class="mt-3">Examples:</h6>
+                    <ul class="text-success">
+                        <li>✓ user@example.com</li>
+                        <li>✓ user@example.org</li>
+                        <li>✓ user@example.us</li>
+                    </ul>
+                    <ul class="text-danger">
+                        <li>✗ user@example.uk</li>
+                        <li>✗ user@example.co.uk</li>
+                        <li>✗ user@example.gov</li>
+                        <li>✗ user@example.edu</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

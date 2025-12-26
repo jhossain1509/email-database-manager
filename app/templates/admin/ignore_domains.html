@@ -1,0 +1,80 @@
+{% extends "layouts/base.html" %}
+{% block title %}Admin - Ignore Domains{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+    <h2><i class="bi bi-x-circle"></i> Ignore Domains</h2>
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header"><h5>Add Single Domain</h5></div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('admin.add_ignore_domain') }}">
+                        <div class="mb-3">
+                            <label for="domain" class="form-label">Domain</label>
+                            <input type="text" class="form-control" id="domain" name="domain" placeholder="example.com" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="reason" class="form-label">Reason (Optional)</label>
+                            <input type="text" class="form-control" id="reason" name="reason" placeholder="Why ignore this domain?">
+                        </div>
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-plus"></i> Add Domain</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header"><h5>Bulk Add Domains</h5></div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('admin.bulk_add_ignore_domains') }}">
+                        <div class="mb-3">
+                            <label for="domains_text" class="form-label">Domains</label>
+                            <textarea class="form-control" id="domains_text" name="domains_text" rows="5" 
+                                      placeholder="example1.com&#10;example2.com&#10;example3.com"></textarea>
+                            <small class="form-text text-muted">One domain per line or comma-separated</small>
+                        </div>
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-plus"></i> Bulk Add</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header"><h5>Current Ignore List ({{ domains|length }} domains)</h5></div>
+                <div class="card-body">
+                    {% if domains %}
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr><th>Domain</th><th>Added By</th><th>Date</th><th>Reason</th><th>Actions</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for domain in domains %}
+                                <tr>
+                                    <td>{{ domain.domain }}</td>
+                                    <td>{{ domain.added_by }}</td>
+                                    <td>{{ domain.added_at.strftime('%Y-%m-%d') }}</td>
+                                    <td>{{ domain.reason or '-' }}</td>
+                                    <td>
+                                        <form method="POST" action="{{ url_for('admin.delete_ignore_domain', domain_id=domain.id) }}" style="display:inline;">
+                                            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this domain?')">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No domains in ignore list.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
