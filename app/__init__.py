@@ -70,6 +70,16 @@ def create_app(config_class=Config):
     def load_user(user_id):
         return User.query.get(int(user_id))
     
+    # Root route handler
+    @app.route('/')
+    def index():
+        """Root route - redirect to dashboard if authenticated, otherwise to login"""
+        from flask_login import current_user
+        from flask import redirect, url_for
+        if current_user.is_authenticated:
+            return redirect(url_for('dashboard.index'))
+        return redirect(url_for('auth.login'))
+    
     return app
 
 # For Celery worker - create app and configure celery
