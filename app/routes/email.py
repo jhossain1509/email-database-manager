@@ -280,16 +280,38 @@ def download_rejected(batch_id):
 @bp.route('/export', methods=['GET', 'POST'])
 @login_required
 def export():
-    """Export emails"""
+    """Export emails with advanced filtering"""
     if request.method == 'POST':
         export_type = request.form.get('export_type', 'verified')
         batch_id = request.form.get('batch_id', type=int)
         filter_domains_str = request.form.get('filter_domains', '').strip()
+        export_format = request.form.get('export_format', 'csv')
+        split_files = request.form.get('split_files') == 'on'
+        split_size = request.form.get('split_size', 10000, type=int)
+        custom_fields = request.form.get('custom_fields', '').strip()
         
-        # Parse filter domains
+        # Parse domain limits (format: domain1:limit1,domain2:limit2)
+        domain_limits = {}
+        domain_limit_str = request.form.get('domain_limits', '').strip()
+        if domain_limit_str:
+            for item in domain_limit_str.split(','):
+                if ':' in item:
+                    domain, limit = item.split(':', 1)
+                    domain = domain.strip()
+                    try:
+                        domain_limits[domain] = int(limit.strip())
+                    except ValueError:
+                        pass
+        
+        # Parse filter domains (for backward compatibility)
         filter_domains = None
         if filter_domains_str:
             filter_domains = [d.strip() for d in filter_domains_str.split(',') if d.strip()]
+        
+        # Parse custom fields
+        fields_list = None
+        if custom_fields:
+            fields_list = [f.strip() for f in custom_fields.split(',') if f.strip()]
         
         # Check batch access for guest users
         if batch_id:
@@ -303,12 +325,17 @@ def export():
             flash('Guest users must select a specific batch to export.', 'warning')
             return redirect(request.url)
         
-        # Start export job
+        # Start export job with enhanced parameters
         task = export_emails_task.delay(
             current_user.id,
             export_type,
             batch_id,
-            filter_domains
+            filter_domains,
+            domain_limits,
+            split_files,
+            split_size,
+            export_format,
+            fields_list
         )
         
         # Create job record
@@ -330,12 +357,44 @@ def export():
     # Get batches for selection
     if current_user.is_guest():
         user_batches = Batch.query.filter_by(user_id=current_user.id).all()
+        base_query = Email.query.filter_by(uploaded_by=current_user.id)
     elif current_user.is_admin():
         user_batches = Batch.query.all()
+        base_query = Email.query
     else:
         user_batches = Batch.query.filter_by(user_id=current_user.id).all()
+        base_query = Email.query.filter_by(uploaded_by=current_user.id)
     
-    return render_template('email/export.html', batches=user_batches)
+    # Get domain statistics
+    from flask import current_app
+    from sqlalchemy import func
+    
+    TOP_DOMAINS = current_app.config.get('TOP_DOMAINS', [
+        'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
+        'aol.com', 'icloud.com', 'protonmail.com', 'mail.com',
+        'zoho.com', 'gmx.com'
+    ])
+    
+    domain_stats = []
+    for domain in TOP_DOMAINS:
+        count = base_query.filter_by(domain=domain).count()
+        if count > 0:
+            domain_stats.append({
+                'domain': domain,
+                'count': count,
+                'category': domain
+            })
+    
+    # Get mixed domain count
+    mixed_count = base_query.filter_by(domain_category='mixed').count()
+    if mixed_count > 0:
+        domain_stats.append({
+            'domain': 'mixed',
+            'count': mixed_count,
+            'category': 'mixed'
+        })
+    
+    return render_template('email/export.html', batches=user_batches, domain_stats=domain_stats)
 
 @bp.route('/download/<int:history_id>')
 @login_required
@@ -356,3 +415,64 @@ def download_export(history_id):
     log_activity('download', f'Downloaded export: {history.filename}', 'download_history', history.id)
     
     return send_file(history.file_path, as_attachment=True, download_name=history.filename)
+
+@bp.route('/download-history')
+@login_required
+def download_history():
+    """View user's download history"""
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+    
+    # Get user's download history
+    if current_user.is_guest():
+        query = DownloadHistory.query.filter_by(user_id=current_user.id)
+    elif current_user.is_admin():
+        # Admin can see all history (optional - uncomment if needed)
+        # query = DownloadHistory.query
+        query = DownloadHistory.query.filter_by(user_id=current_user.id)
+    else:
+        query = DownloadHistory.query.filter_by(user_id=current_user.id)
+    
+    # Add search filter
+    search = request.args.get('search', '').strip()
+    if search:
+        query = query.filter(DownloadHistory.filename.ilike(f'%{search}%'))
+    
+    # Order by recent first
+    query = query.order_by(desc(DownloadHistory.downloaded_at))
+    
+    # Paginate
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    histories = pagination.items
+    
+    return render_template('email/download_history.html', 
+                         histories=histories, 
+                         pagination=pagination,
+                         search=search)
+
+@bp.route('/search', methods=['GET', 'POST'])
+@login_required
+def email_search():
+    """Search for emails in database"""
+    results = []
+    search_query = ''
+    
+    if request.method == 'POST' or request.args.get('q'):
+        search_query = request.form.get('search', '') or request.args.get('q', '')
+        search_query = search_query.strip().lower()
+        
+        if search_query:
+            # Build base query based on user role
+            if current_user.is_guest():
+                base_query = Email.query.filter_by(uploaded_by=current_user.id)
+            else:
+                base_query = Email.query
+            
+            # Search for email
+            results = base_query.filter(
+                Email.email.ilike(f'%{search_query}%')
+            ).limit(100).all()
+            
+            log_activity('search', f'Searched for: {search_query}', 'email', None)
+    
+    return render_template('email/search.html', results=results, search_query=search_query)
