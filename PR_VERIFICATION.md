@@ -38,7 +38,7 @@ This PR contains critical fixes that make the Email Database Manager application
 **Verification:**
 ```bash
 ✓ Migrations directory exists: /migrations/
-✓ Initial migration present: migrations/versions/e08bd99be194_*.py
+✓ Initial migration present: migrations/versions/e08bd99be194_initial_migration_with_all_models.py
 ✓ Database creation test: 12 tables created successfully
 ✓ Migration is idempotent and safe to run multiple times
 ```
