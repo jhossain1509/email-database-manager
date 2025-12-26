@@ -1,0 +1,278 @@
+from flask import Blueprint, render_template, request, redirect, url_for, flash, send_file, jsonify
+from flask_login import login_required, current_user
+from werkzeug.utils import secure_filename
+from app import db
+from app.models.email import Email, Batch, RejectedEmail
+from app.models.job import Job, DownloadHistory
+from app.jobs.tasks import import_emails_task, validate_emails_task
+from app.utils.helpers import log_activity
+from app.utils.decorators import guest_cannot_access_main_db
+import os
+import csv
+import zipfile
+from datetime import datetime
+from sqlalchemy import desc
+
+bp = Blueprint('email', __name__, url_prefix='/email')
+
+ALLOWED_EXTENSIONS = {'csv', 'txt'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@bp.route('/upload', methods=['GET', 'POST'])
+@login_required
+def upload():
+    """Upload email file"""
+    if request.method == 'POST':
+        # Check if file is present
+        if 'file' not in request.files:
+            flash('No file selected.', 'danger')
+            return redirect(request.url)
+        
+        file = request.files['file']
+        
+        if file.filename == '':
+            flash('No file selected.', 'danger')
+            return redirect(request.url)
+        
+        if not allowed_file(file.filename):
+            flash('Invalid file type. Only CSV and TXT files are allowed.', 'danger')
+            return redirect(request.url)
+        
+        # Get form data
+        batch_name = request.form.get('batch_name', '').strip()
+        consent_granted = request.form.get('consent_granted') == 'on'
+        
+        if not batch_name:
+            batch_name = f"Upload {datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        
+        if not consent_granted:
+            flash('You must grant consent to upload emails.', 'warning')
+            return redirect(request.url)
+        
+        # Save file
+        filename = secure_filename(file.filename)
+        from flask import current_app
+        upload_folder = current_app.config['UPLOAD_FOLDER']
+        os.makedirs(upload_folder, exist_ok=True)
+        
+        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        saved_filename = f"{current_user.id}_{timestamp}_{filename}"
+        file_path = os.path.join(upload_folder, saved_filename)
+        file.save(file_path)
+        
+        # Create batch record
+        batch = Batch(
+            name=batch_name,
+            filename=saved_filename,
+            user_id=current_user.id,
+            status='processing'
+        )
+        db.session.add(batch)
+        db.session.commit()
+        
+        # Start import job
+        task = import_emails_task.delay(
+            batch.id,
+            file_path,
+            current_user.id,
+            consent_granted
+        )
+        
+        # Create job record
+        job = Job(
+            job_id=task.id,
+            job_type='import',
+            user_id=current_user.id,
+            batch_id=batch.id,
+            status='pending'
+        )
+        db.session.add(job)
+        db.session.commit()
+        
+        log_activity('upload', f'Uploaded batch: {batch_name}', 'batch', batch.id)
+        
+        flash(f'File uploaded successfully! Import job started.', 'success')
+        return redirect(url_for('email.job_status', job_id=task.id))
+    
+    return render_template('email/upload.html')
+
+@bp.route('/batches')
+@login_required
+def batches():
+    """List all batches"""
+    if current_user.is_guest():
+        # Guest sees only their batches
+        user_batches = Batch.query.filter_by(user_id=current_user.id)\
+            .order_by(desc(Batch.created_at))\
+            .all()
+    elif current_user.is_admin():
+        # Admin sees all batches
+        user_batches = Batch.query.order_by(desc(Batch.created_at)).all()
+    else:
+        # Regular users see their batches
+        user_batches = Batch.query.filter_by(user_id=current_user.id)\
+            .order_by(desc(Batch.created_at))\
+            .all()
+    
+    return render_template('email/batches.html', batches=user_batches)
+
+@bp.route('/batch/<int:batch_id>')
+@login_required
+def batch_detail(batch_id):
+    """View batch details"""
+    batch = Batch.query.get_or_404(batch_id)
+    
+    # Check access
+    if current_user.is_guest() and batch.user_id != current_user.id:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('email.batches'))
+    
+    # Get batch statistics
+    emails = Email.query.filter_by(batch_id=batch_id).limit(100).all()
+    rejected = RejectedEmail.query.filter_by(batch_id=batch_id).limit(100).all()
+    jobs = Job.query.filter_by(batch_id=batch_id).order_by(desc(Job.created_at)).all()
+    
+    return render_template(
+        'email/batch_detail.html',
+        batch=batch,
+        emails=emails,
+        rejected=rejected,
+        jobs=jobs
+    )
+
+@bp.route('/validate', methods=['GET', 'POST'])
+@login_required
+def validate():
+    """Validate emails in a batch"""
+    if request.method == 'POST':
+        batch_id = request.form.get('batch_id', type=int)
+        check_dns = request.form.get('check_dns') == 'on'
+        check_role = request.form.get('check_role') == 'on'
+        
+        if not batch_id:
+            flash('Please select a batch.', 'danger')
+            return redirect(request.url)
+        
+        batch = Batch.query.get(batch_id)
+        if not batch:
+            flash('Batch not found.', 'danger')
+            return redirect(request.url)
+        
+        # Check access
+        if current_user.is_guest() and batch.user_id != current_user.id:
+            flash('Access denied.', 'danger')
+            return redirect(request.url)
+        
+        # Start validation job
+        task = validate_emails_task.delay(
+            batch_id,
+            current_user.id,
+            check_dns,
+            check_role
+        )
+        
+        # Create job record
+        job = Job(
+            job_id=task.id,
+            job_type='validate',
+            user_id=current_user.id,
+            batch_id=batch_id,
+            status='pending'
+        )
+        db.session.add(job)
+        db.session.commit()
+        
+        log_activity('validate', f'Started validation for batch: {batch.name}', 'batch', batch.id)
+        
+        flash(f'Validation started for batch: {batch.name}', 'success')
+        return redirect(url_for('email.job_status', job_id=task.id))
+    
+    # Get batches for selection
+    if current_user.is_guest():
+        user_batches = Batch.query.filter_by(user_id=current_user.id).all()
+    else:
+        user_batches = Batch.query.filter_by(user_id=current_user.id).all()
+    
+    return render_template('email/validate.html', batches=user_batches)
+
+@bp.route('/job/<job_id>')
+@login_required
+def job_status(job_id):
+    """View job status"""
+    job = Job.query.filter_by(job_id=job_id).first_or_404()
+    
+    # Check access
+    if not current_user.is_admin() and job.user_id != current_user.id:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('dashboard.index'))
+    
+    return render_template('email/job_status.html', job=job)
+
+@bp.route('/api/job/<job_id>/status')
+@login_required
+def api_job_status(job_id):
+    """API endpoint for job status polling"""
+    job = Job.query.filter_by(job_id=job_id).first_or_404()
+    
+    # Check access
+    if not current_user.is_admin() and job.user_id != current_user.id:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    return jsonify({
+        'id': job.id,
+        'job_id': job.job_id,
+        'job_type': job.job_type,
+        'status': job.status,
+        'total': job.total,
+        'processed': job.processed,
+        'errors': job.errors,
+        'progress_percent': job.progress_percent,
+        'result_message': job.result_message,
+        'error_message': job.error_message
+    })
+
+@bp.route('/download-rejected/<int:batch_id>')
+@login_required
+def download_rejected(batch_id):
+    """Download rejected emails for a batch"""
+    batch = Batch.query.get_or_404(batch_id)
+    
+    # Check access
+    if current_user.is_guest() and batch.user_id != current_user.id:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('email.batches'))
+    
+    # Get rejected emails
+    rejected = RejectedEmail.query.filter_by(batch_id=batch_id).all()
+    
+    if not rejected:
+        flash('No rejected emails found for this batch.', 'info')
+        return redirect(url_for('email.batch_detail', batch_id=batch_id))
+    
+    # Create CSV file
+    from flask import current_app
+    export_folder = current_app.config['EXPORT_FOLDER']
+    os.makedirs(export_folder, exist_ok=True)
+    
+    timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    filename = f"rejected_{batch_id}_{timestamp}.csv"
+    file_path = os.path.join(export_folder, filename)
+    
+    with open(file_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Email', 'Domain', 'Reason', 'Details', 'Rejected At'])
+        
+        for r in rejected:
+            writer.writerow([
+                r.email,
+                r.domain,
+                r.reason,
+                r.details or '',
+                r.rejected_at.strftime('%Y-%m-%d %H:%M:%S')
+            ])
+    
+    log_activity('download', f'Downloaded rejected emails for batch: {batch.name}', 'batch', batch.id)
+    
+    return send_file(file_path, as_attachment=True, download_name=filename)

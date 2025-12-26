@@ -1,0 +1,37 @@
+{% extends "layouts/base.html" %}
+{% block title %}Admin - Download History{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+    <h2><i class="bi bi-download"></i> Download History</h2>
+    <div class="mt-4">
+        {% if history %}
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr><th>User</th><th>Batch</th><th>Type</th><th>Filename</th><th>Records</th><th>Date</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                    {% for item in history %}
+                    <tr>
+                        <td>{{ item.user.username }}</td>
+                        <td>{% if item.batch %}{{ item.batch.name }}{% else %}-{% endif %}</td>
+                        <td><span class="badge bg-info">{{ item.download_type }}</span></td>
+                        <td>{{ item.filename }}</td>
+                        <td>{{ item.record_count }}</td>
+                        <td>{{ item.downloaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>
+                            <a href="{{ url_for('admin.redownload', history_id=item.id) }}" class="btn btn-sm btn-primary">
+                                <i class="bi bi-download"></i> Re-download
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No download history available.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
