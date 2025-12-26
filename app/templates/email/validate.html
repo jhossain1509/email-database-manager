@@ -1,0 +1,36 @@
+{% extends "layouts/base.html" %}
+{% block title %}Validate Emails{% endblock %}
+{% block content %}
+<div class="container mt-4">
+    <h2><i class="bi bi-check-circle"></i> Validate Emails</h2>
+    <div class="row mt-4">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header"><h5>Select Batch to Validate</h5></div>
+                <div class="card-body">
+                    <form method="POST">
+                        <div class="mb-3">
+                            <label for="batch_id" class="form-label">Batch</label>
+                            <select class="form-select" id="batch_id" name="batch_id" required>
+                                <option value="">-- Select a batch --</option>
+                                {% for batch in batches %}
+                                <option value="{{ batch.id }}">{{ batch.name }} ({{ batch.total_count }} emails)</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="check_dns" name="check_dns">
+                            <label class="form-check-label" for="check_dns">Check DNS/MX records (slower)</label>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="check_role" name="check_role">
+                            <label class="form-check-label" for="check_role">Filter role-based emails (info@, admin@, etc.)</label>
+                        </div>
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-check-circle"></i> Start Validation</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

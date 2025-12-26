@@ -1,0 +1,89 @@
+{% extends "layouts/base.html" %}
+{% block title %}Batch Detail{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+    <h2><i class="bi bi-folder"></i> {{ batch.name }}</h2>
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header"><h5>Batch Statistics</h5></div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-2"><strong>Total:</strong> {{ batch.total_count }}</div>
+                        <div class="col-md-2"><strong>Valid:</strong> <span class="text-success">{{ batch.valid_count }}</span></div>
+                        <div class="col-md-2"><strong>Invalid:</strong> <span class="text-danger">{{ batch.invalid_count }}</span></div>
+                        <div class="col-md-2"><strong>Rejected:</strong> <span class="text-warning">{{ batch.rejected_count }}</span></div>
+                        <div class="col-md-2"><strong>Status:</strong> <span class="badge bg-info">{{ batch.status }}</span></div>
+                    </div>
+                    <div class="mt-3">
+                        <a href="{{ url_for('email.download_rejected', batch_id=batch.id) }}" class="btn btn-warning">
+                            <i class="bi bi-download"></i> Download Rejected Emails
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header"><h5>Sample Emails (First 100)</h5></div>
+                <div class="card-body">
+                    {% if emails %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead><tr><th>Email</th><th>Domain</th><th>Valid</th></tr></thead>
+                            <tbody>
+                                {% for email in emails[:20] %}
+                                <tr>
+                                    <td>{{ email.email }}</td>
+                                    <td>{{ email.domain }}</td>
+                                    <td>
+                                        {% if email.is_validated %}
+                                            {% if email.is_valid %}
+                                            <span class="badge bg-success">Valid</span>
+                                            {% else %}
+                                            <span class="badge bg-danger">Invalid</span>
+                                            {% endif %}
+                                        {% else %}
+                                        <span class="badge bg-secondary">Not validated</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No emails in this batch.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header"><h5>Rejected Emails (First 100)</h5></div>
+                <div class="card-body">
+                    {% if rejected %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead><tr><th>Email</th><th>Reason</th></tr></thead>
+                            <tbody>
+                                {% for r in rejected[:20] %}
+                                <tr>
+                                    <td>{{ r.email }}</td>
+                                    <td><span class="badge bg-warning">{{ r.reason }}</span></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No rejected emails.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
