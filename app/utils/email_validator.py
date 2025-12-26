@@ -227,13 +227,33 @@ def calculate_email_quality_score(email, is_valid=None, has_mx=None, is_role=Non
     """
     Calculate email quality score (0-100)
     
+    Args:
+        email: Email address
+        is_valid: Whether email passed validation (True/False/None)
+        has_mx: Whether domain has MX record (True/False/None)
+        is_role: Whether email is role-based (True/False/None)
+        is_disposable: Whether email is from disposable service (True/False/None)
+        domain_category: Domain category - should be a TOP domain name (e.g., 'gmail.com')
+                        or 'mixed' for other domains. Non-null, non-'mixed' values are 
+                        treated as top domains.
+    
     Scoring criteria:
-    - Valid syntax: +30
+    - Valid syntax: +30 (base score)
     - Has MX record: +20
     - Not role-based: +15
     - Not disposable: +15
-    - Top domain: +10, Mixed: +5
+    - Top domain (not 'mixed'): +10
+    - Mixed domain: +5
     - Valid flag: +10
+    
+    Penalties:
+    - No MX: -10
+    - Role-based: -5
+    - Disposable: -20
+    - Invalid: -15
+    
+    Returns:
+        int: Quality score between 0 and 100
     """
     score = 0
     
@@ -258,9 +278,9 @@ def calculate_email_quality_score(email, is_valid=None, has_mx=None, is_role=Non
     elif is_disposable is True:
         score -= 20
     
-    # Domain category
+    # Domain category - top domains get +10, mixed get +5
     if domain_category and domain_category != 'mixed':
-        score += 10  # Top domain
+        score += 10  # Top domain (e.g., 'gmail.com', 'yahoo.com')
     elif domain_category == 'mixed':
         score += 5
     

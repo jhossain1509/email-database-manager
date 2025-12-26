@@ -189,7 +189,6 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
             raise
 
 @shared_task(bind=True)
-@shared_task(bind=True)
 def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=False, check_disposable=True):
     """
     Validate emails in a batch with enhanced validation.
@@ -404,6 +403,7 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
             exported_count = 0
             file_paths = []
             file_number = 1
+            file_counts = []  # Track count per file
             
             if split_files and len(emails_to_export) > split_size:
                 # Split into multiple files
@@ -415,6 +415,7 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
                     file_paths.append((filename, file_path))
                     
                     chunk_count = _write_export_file(chunk, file_path, fields, export_format, suppressed)
+                    file_counts.append(chunk_count)
                     exported_count += chunk_count
                     file_number += 1
                     
@@ -431,6 +432,7 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
                 exported_count = _write_export_file(
                     emails_to_export, file_path, fields, export_format, suppressed, job, self
                 )
+                file_counts.append(exported_count)
             
             # Mark emails as downloaded
             for email_obj in emails_to_export:
@@ -441,7 +443,7 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
             
             # Create download history entries
             history_ids = []
-            for filename, file_path in file_paths:
+            for idx, (filename, file_path) in enumerate(file_paths):
                 file_size = os.path.getsize(file_path)
                 history = DownloadHistory(
                     user_id=user_id,
@@ -451,7 +453,7 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
                     filename=filename,
                     file_path=file_path,
                     file_size=file_size,
-                    record_count=exported_count if len(file_paths) == 1 else None
+                    record_count=file_counts[idx]
                 )
                 db.session.add(history)
                 db.session.flush()

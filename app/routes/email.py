@@ -299,9 +299,13 @@ def export():
                     domain, limit = item.split(':', 1)
                     domain = domain.strip()
                     try:
-                        domain_limits[domain] = int(limit.strip())
+                        limit_val = int(limit.strip())
+                        if limit_val > 0:
+                            domain_limits[domain] = limit_val
+                        else:
+                            flash(f'Invalid limit for domain {domain}: must be positive', 'warning')
                     except ValueError:
-                        pass
+                        flash(f'Invalid limit for domain {domain}: must be a number', 'warning')
         
         # Parse filter domains (for backward compatibility)
         filter_domains = None

@@ -112,7 +112,7 @@
                             <small class="form-text text-muted">Split export into files with this many records each</small>
                         </div>
                         
-                        <button type="submit" class="btn btn-primary" onclick="prepareDomainLimits()">
+                        <button type="submit" class="btn btn-primary" onclick="return prepareDomainLimits()">
                             <i class="bi bi-download"></i> Start Export
                         </button>
                         <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary">Cancel</a>
@@ -163,17 +163,30 @@ function toggleSplitSize() {
 function prepareDomainLimits() {
     const checkboxes = document.querySelectorAll('.domain-checkbox:checked');
     const limits = [];
+    let hasError = false;
     
     checkboxes.forEach(cb => {
         const domain = cb.dataset.domain;
         const limitInput = document.getElementById('limit_' + domain);
         const limit = limitInput.value;
-        if (limit && limit > 0) {
-            limits.push(domain + ':' + limit);
+        
+        if (!limit || limit <= 0) {
+            // If checkbox is selected but no valid limit, show error
+            alert('Please enter a valid limit for ' + domain + ' or uncheck the domain');
+            hasError = true;
+            return false;
         }
+        
+        limits.push(domain + ':' + limit);
     });
     
+    if (hasError) {
+        event.preventDefault();
+        return false;
+    }
+    
     document.getElementById('domain_limits').value = limits.join(',');
+    return true;
 }
 
 // Hide custom fields when TXT format is selected
