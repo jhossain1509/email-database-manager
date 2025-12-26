@@ -9,9 +9,12 @@ import os
 db = SQLAlchemy()
 login_manager = LoginManager()
 migrate = Migrate()
+
+# Create Celery instance
 celery = Celery(__name__)
 
 def make_celery(app):
+    """Configure Celery with Flask app context"""
     celery.conf.update(
         broker_url=app.config['CELERY_BROKER_URL'],
         result_backend=app.config['CELERY_RESULT_BACKEND'],
@@ -20,6 +23,8 @@ def make_celery(app):
         accept_content=['json'],
         timezone='UTC',
         enable_utc=True,
+        task_track_started=True,
+        task_send_sent_event=True,
     )
     
     class ContextTask(celery.Task):
@@ -67,5 +72,6 @@ def create_app(config_class=Config):
     
     return app
 
-# For Celery worker
-celery_app = make_celery(create_app())
+# For Celery worker - create app and configure celery
+app = create_app()
+celery_app = make_celery(app)
