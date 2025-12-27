@@ -304,13 +304,23 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
             raise
 
 @shared_task(bind=True)
-def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=False, check_disposable=True):
+def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=False, check_disposable=True, 
+                        validate_all_unverified=False, filter_domains=''):
     """
     Validate emails in a batch with enhanced validation.
     Job-driven with progress reporting.
     
     For guest users: Validates emails from their GuestEmailItem scope,
     but updates the canonical Email rows.
+    
+    Args:
+        batch_id: Batch ID to validate (None if validate_all_unverified is True)
+        user_id: User ID performing validation
+        check_dns: Whether to check DNS/MX records
+        check_role: Whether to filter role-based emails
+        check_disposable: Whether to check for disposable emails
+        validate_all_unverified: Whether to validate all unverified emails
+        filter_domains: Comma-separated list of domains to filter
     """
     from app import create_app
     app = create_app()
@@ -334,10 +344,6 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
             job.started_at = datetime.utcnow()
             db.session.commit()
             
-            batch = Batch.query.get(batch_id)
-            if not batch:
-                raise Exception(f'Batch {batch_id} not found')
-            
             # Check if user is guest
             user = User.query.get(user_id)
             is_guest = user.is_guest() if user else False
@@ -345,16 +351,31 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
             # Get ignore domains
             ignore_domains = [d.domain for d in IgnoreDomain.query.all()]
             
+            # Build filter for domains if provided
+            domain_filter = None
+            if filter_domains:
+                domain_filter = [d.strip() for d in filter_domains.split(',') if d.strip()]
+            
             # For guest users, get emails via their guest items
             # For regular users, get emails directly
             if is_guest:
-                # Get guest items that were inserted or are duplicates (have matched_email_id)
-                guest_items = GuestEmailItem.query.filter_by(
-                    batch_id=batch_id,
-                    user_id=user_id
-                ).filter(
-                    GuestEmailItem.matched_email_id.isnot(None)
-                ).all()
+                if validate_all_unverified:
+                    # Get all unverified emails for guest
+                    guest_items = GuestEmailItem.query.filter_by(
+                        user_id=user_id
+                    ).filter(
+                        GuestEmailItem.matched_email_id.isnot(None)
+                    ).all()
+                elif batch_id:
+                    # Get guest items from specific batch
+                    guest_items = GuestEmailItem.query.filter_by(
+                        batch_id=batch_id,
+                        user_id=user_id
+                    ).filter(
+                        GuestEmailItem.matched_email_id.isnot(None)
+                    ).all()
+                else:
+                    raise Exception('Either batch_id or validate_all_unverified must be specified')
                 
                 # Get unique emails to validate
                 emails_to_validate = []
@@ -362,14 +383,47 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                 
                 for item in guest_items:
                     if item.matched_email_id and item.matched_email_id not in seen_email_ids:
-                        seen_email_ids.add(item.matched_email_id)
-                        if item.matched_email:
-                            emails_to_validate.append(item.matched_email)
+                        email_obj = item.matched_email
+                        if email_obj and not email_obj.is_validated:
+                            # Apply domain filter if specified
+                            if domain_filter:
+                                if email_obj.domain in domain_filter or (email_obj.domain_category == 'mixed' and 'mixed' in domain_filter):
+                                    seen_email_ids.add(item.matched_email_id)
+                                    emails_to_validate.append(email_obj)
+                            else:
+                                seen_email_ids.add(item.matched_email_id)
+                                emails_to_validate.append(email_obj)
                 
                 emails = emails_to_validate
             else:
-                # Regular user: get emails from batch
-                emails = Email.query.filter_by(batch_id=batch_id).all()
+                # Regular user
+                if validate_all_unverified:
+                    # Get all unverified emails for user
+                    query = Email.query.filter_by(uploaded_by=user_id, is_validated=False)
+                elif batch_id:
+                    batch = Batch.query.get(batch_id)
+                    if not batch:
+                        raise Exception(f'Batch {batch_id} not found')
+                    # Get unverified emails from batch
+                    query = Email.query.filter_by(batch_id=batch_id, is_validated=False)
+                else:
+                    raise Exception('Either batch_id or validate_all_unverified must be specified')
+                
+                # Apply domain filter if specified
+                if domain_filter:
+                    # Filter by specific domains or mixed category
+                    domain_conditions = []
+                    for domain in domain_filter:
+                        if domain == 'mixed':
+                            domain_conditions.append(Email.domain_category == 'mixed')
+                        else:
+                            domain_conditions.append(Email.domain == domain)
+                    
+                    if domain_conditions:
+                        from sqlalchemy import or_
+                        query = query.filter(or_(*domain_conditions))
+                
+                emails = query.all()
             
             job.total = len(emails)
             db.session.commit()
@@ -426,11 +480,14 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
             # Final commit
             db.session.commit()
             
-            # Update batch statistics
-            batch.valid_count = valid_count
-            batch.invalid_count = invalid_count
-            batch.status = 'validated'
-            db.session.commit()
+            # Update batch statistics if batch_id provided
+            if batch_id:
+                batch = Batch.query.get(batch_id)
+                if batch:
+                    batch.valid_count = Email.query.filter_by(batch_id=batch_id, is_validated=True, is_valid=True).count()
+                    batch.invalid_count = Email.query.filter_by(batch_id=batch_id, is_validated=True, is_valid=False).count()
+                    batch.status = 'validated'
+                    db.session.commit()
             
             # Complete job
             job.complete(

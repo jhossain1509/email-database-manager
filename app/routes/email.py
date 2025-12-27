@@ -166,29 +166,35 @@ def validate():
     """Validate emails in a batch"""
     if request.method == 'POST':
         batch_id = request.form.get('batch_id', type=int)
+        validate_all_unverified = request.form.get('validate_all_unverified') == 'on'
+        filter_domains = request.form.get('filter_domains', '').strip()
         check_dns = request.form.get('check_dns') == 'on'
         check_role = request.form.get('check_role') == 'on'
         
-        if not batch_id:
-            flash('Please select a batch.', 'danger')
+        # Check if validating all unverified or a specific batch
+        if not batch_id and not validate_all_unverified:
+            flash('Please select a batch or choose to validate all unverified emails.', 'danger')
             return redirect(request.url)
         
-        batch = Batch.query.get(batch_id)
-        if not batch:
-            flash('Batch not found.', 'danger')
-            return redirect(request.url)
-        
-        # Check access
-        if current_user.is_guest() and batch.user_id != current_user.id:
-            flash('Access denied.', 'danger')
-            return redirect(request.url)
+        if batch_id:
+            batch = Batch.query.get(batch_id)
+            if not batch:
+                flash('Batch not found.', 'danger')
+                return redirect(request.url)
+            
+            # Check access
+            if current_user.is_guest() and batch.user_id != current_user.id:
+                flash('Access denied.', 'danger')
+                return redirect(request.url)
         
         # Start validation job
         task = validate_emails_task.delay(
-            batch_id,
+            batch_id if batch_id else None,
             current_user.id,
             check_dns,
-            check_role
+            check_role,
+            validate_all_unverified,
+            filter_domains
         )
         
         # Create job record
@@ -202,18 +208,64 @@ def validate():
         db.session.add(job)
         db.session.commit()
         
-        log_activity('validate', f'Started validation for batch: {batch.name}', 'batch', batch.id)
+        if batch_id:
+            log_activity('validate', f'Started validation for batch: {batch.name}', 'batch', batch.id)
+        else:
+            log_activity('validate', f'Started validation for all unverified emails', 'job', job.id)
         
-        flash(f'Validation started for batch: {batch.name}', 'success')
+        flash(f'Validation started! Job ID: {task.id}', 'success')
         return redirect(url_for('email.job_status', job_id=task.id))
     
-    # Get batches for selection
+    # Get batches for selection (only show batches with unverified emails)
     if current_user.is_guest():
         user_batches = Batch.query.filter_by(user_id=current_user.id).all()
     else:
         user_batches = Batch.query.filter_by(user_id=current_user.id).all()
     
-    return render_template('email/validate.html', batches=user_batches)
+    # Filter batches to show only those with unverified emails
+    batches_with_unverified = []
+    for batch in user_batches:
+        unverified_count = Email.query.filter_by(batch_id=batch.id, is_validated=False).count()
+        if unverified_count > 0:
+            batch.unverified_count = unverified_count
+            batches_with_unverified.append(batch)
+    
+    # Get domain statistics for filtering
+    from flask import current_app
+    from sqlalchemy import func
+    
+    if current_user.is_guest():
+        base_query = Email.query.filter_by(uploaded_by=current_user.id, is_validated=False)
+    else:
+        base_query = Email.query.filter_by(uploaded_by=current_user.id, is_validated=False)
+    
+    TOP_DOMAINS = current_app.config.get('TOP_DOMAINS', [])
+    domain_stats = []
+    
+    for domain in TOP_DOMAINS:
+        count = base_query.filter_by(domain=domain).count()
+        if count > 0:
+            domain_stats.append({
+                'domain': domain,
+                'count': count,
+                'category': 'top'
+            })
+    
+    # Mixed domains
+    mixed_count = base_query.filter_by(domain_category='mixed').count()
+    if mixed_count > 0:
+        domain_stats.append({
+            'domain': 'mixed',
+            'count': mixed_count,
+            'category': 'mixed'
+        })
+    
+    total_unverified = base_query.count()
+    
+    return render_template('email/validate.html', 
+                         batches=batches_with_unverified,
+                         domain_stats=domain_stats,
+                         total_unverified=total_unverified)
 
 @bp.route('/job/<job_id>')
 @login_required
@@ -399,6 +451,7 @@ def export():
         base_query = Email.query.filter_by(uploaded_by=current_user.id)
     
     # Get domain statistics (not for guests)
+    domain_stats = []
     if not current_user.is_guest():
         from flask import current_app
         from sqlalchemy import func
@@ -409,22 +462,58 @@ def export():
             'zoho.com', 'gmx.com'
         ])
         
-        domain_stats = []
+        # Build domain stats with available/total counts for each export type
         for domain in TOP_DOMAINS:
-            count = base_query.filter_by(domain=domain).count()
-            if count > 0:
+            domain_query = base_query.filter_by(domain=domain)
+            total = domain_query.count()
+            if total > 0:
+                # Count by validation status
+                verified = domain_query.filter_by(is_validated=True, is_valid=True).count()
+                unverified = domain_query.filter_by(is_validated=False).count()
+                invalid = domain_query.filter_by(is_validated=True, is_valid=False).count()
+                
+                # Count available (not downloaded)
+                verified_available = domain_query.filter_by(is_validated=True, is_valid=True, downloaded=False).count()
+                unverified_available = domain_query.filter_by(is_validated=False, downloaded=False).count()
+                invalid_available = domain_query.filter_by(is_validated=True, is_valid=False, downloaded=False).count()
+                all_available = domain_query.filter_by(downloaded=False).count()
+                
                 domain_stats.append({
                     'domain': domain,
-                    'count': count,
-                    'category': domain
+                    'total': total,
+                    'verified': verified,
+                    'verified_available': verified_available,
+                    'unverified': unverified,
+                    'unverified_available': unverified_available,
+                    'invalid': invalid,
+                    'invalid_available': invalid_available,
+                    'all_available': all_available,
+                    'category': 'top'
                 })
         
         # Get mixed domain count
-        mixed_count = base_query.filter_by(domain_category='mixed').count()
-        if mixed_count > 0:
+        mixed_query = base_query.filter_by(domain_category='mixed')
+        mixed_total = mixed_query.count()
+        if mixed_total > 0:
+            mixed_verified = mixed_query.filter_by(is_validated=True, is_valid=True).count()
+            mixed_unverified = mixed_query.filter_by(is_validated=False).count()
+            mixed_invalid = mixed_query.filter_by(is_validated=True, is_valid=False).count()
+            
+            mixed_verified_available = mixed_query.filter_by(is_validated=True, is_valid=True, downloaded=False).count()
+            mixed_unverified_available = mixed_query.filter_by(is_validated=False, downloaded=False).count()
+            mixed_invalid_available = mixed_query.filter_by(is_validated=True, is_valid=False, downloaded=False).count()
+            mixed_all_available = mixed_query.filter_by(downloaded=False).count()
+            
             domain_stats.append({
                 'domain': 'mixed',
-                'count': mixed_count,
+                'total': mixed_total,
+                'verified': mixed_verified,
+                'verified_available': mixed_verified_available,
+                'unverified': mixed_unverified,
+                'unverified_available': mixed_unverified_available,
+                'invalid': mixed_invalid,
+                'invalid_available': mixed_invalid_available,
+                'all_available': mixed_all_available,
                 'category': 'mixed'
             })
     

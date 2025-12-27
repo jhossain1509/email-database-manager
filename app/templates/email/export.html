@@ -56,14 +56,23 @@
                                             </label>
                                         </div>
                                         <div class="col-md-3">
-                                            <span class="badge bg-info">{{ stat.count }} available</span>
+                                            <span class="badge bg-info domain-count" 
+                                                  data-domain="{{ stat.domain }}"
+                                                  data-verified="{{ stat.verified_available }}"
+                                                  data-unverified="{{ stat.unverified_available }}"
+                                                  data-invalid="{{ stat.invalid_available }}"
+                                                  data-all="{{ stat.all_available }}">
+                                                {{ stat.all_available }} available
+                                            </span>
+                                            <small class="text-muted">({{ stat.total }} total)</small>
                                         </div>
                                         <div class="col-md-4">
                                             <input type="number" class="form-control form-control-sm domain-limit" 
                                                    id="limit_{{ stat.domain }}" 
+                                                   data-domain="{{ stat.domain }}"
                                                    placeholder="Limit"
                                                    min="1" 
-                                                   max="{{ stat.count }}"
+                                                   max="{{ stat.all_available }}"
                                                    disabled>
                                         </div>
                                     </div>
@@ -160,6 +169,44 @@ function toggleSplitSize() {
     document.getElementById('split_size_section').style.display = splitFiles ? 'block' : 'none';
 }
 
+function updateDomainCounts() {
+    const exportType = document.getElementById('export_type').value;
+    const domainCounts = document.querySelectorAll('.domain-count');
+    
+    domainCounts.forEach(badge => {
+        const domain = badge.dataset.domain;
+        let count = 0;
+        
+        switch(exportType) {
+            case 'verified':
+                count = parseInt(badge.dataset.verified);
+                break;
+            case 'unverified':
+                count = parseInt(badge.dataset.unverified);
+                break;
+            case 'invalid':
+                count = parseInt(badge.dataset.invalid);
+                break;
+            case 'all':
+            default:
+                count = parseInt(badge.dataset.all);
+                break;
+        }
+        
+        badge.textContent = count + ' available';
+        
+        // Update limit input max value
+        const limitInput = document.getElementById('limit_' + domain);
+        if (limitInput) {
+            limitInput.max = count;
+            // Clear value if it exceeds new max
+            if (limitInput.value && parseInt(limitInput.value) > count) {
+                limitInput.value = count;
+            }
+        }
+    });
+}
+
 function prepareDomainLimits() {
     const checkboxes = document.querySelectorAll('.domain-checkbox:checked');
     const limits = [];
@@ -189,10 +236,16 @@ function prepareDomainLimits() {
     return true;
 }
 
+// Update domain counts when export type changes
+document.getElementById('export_type').addEventListener('change', updateDomainCounts);
+
 // Hide custom fields when TXT format is selected
 document.getElementById('export_format').addEventListener('change', function() {
     const customFieldsSection = document.getElementById('custom_fields_section');
     customFieldsSection.style.display = this.value === 'csv' ? 'block' : 'none';
 });
+
+// Initialize domain counts on page load
+document.addEventListener('DOMContentLoaded', updateDomainCounts);
 </script>
 {% endblock %}

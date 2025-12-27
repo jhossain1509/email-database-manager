@@ -150,6 +150,40 @@ def delete_user(user_id):
     flash(f'User {username} deleted successfully.', 'success')
     return redirect(url_for('admin.users'))
 
+@bp.route('/user/<int:user_id>/reset-password', methods=['GET', 'POST'])
+@admin_required
+def reset_user_password(user_id):
+    """Reset user password"""
+    user = User.query.get_or_404(user_id)
+    
+    if request.method == 'POST':
+        new_password = request.form.get('new_password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        
+        # Validation
+        if not new_password or not confirm_password:
+            flash('Both password fields are required.', 'danger')
+            return redirect(url_for('admin.reset_user_password', user_id=user_id))
+        
+        if new_password != confirm_password:
+            flash('Passwords do not match.', 'danger')
+            return redirect(url_for('admin.reset_user_password', user_id=user_id))
+        
+        if len(new_password) < 6:
+            flash('Password must be at least 6 characters long.', 'danger')
+            return redirect(url_for('admin.reset_user_password', user_id=user_id))
+        
+        # Reset password
+        user.set_password(new_password)
+        db.session.commit()
+        
+        log_activity('admin_action', f'Reset password for user: {user.username}', 'user', user.id)
+        
+        flash(f'Password for user {user.username} reset successfully.', 'success')
+        return redirect(url_for('admin.users'))
+    
+    return render_template('admin/reset_password.html', user=user)
+
 @bp.route('/ignore-domains')
 @admin_required
 def ignore_domains():
