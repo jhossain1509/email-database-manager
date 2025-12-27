@@ -87,6 +87,45 @@ class DownloadHistory(db.Model):
     def __repr__(self):
         return f'<DownloadHistory {self.filename}>'
 
+class GuestDownloadHistory(db.Model):
+    """
+    Tracks guest export/download history separately from main DB downloads.
+    Allows guests to re-download their previous exports without affecting main DB metrics.
+    """
+    __tablename__ = 'guest_download_history'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    batch_id = db.Column(db.Integer, db.ForeignKey('batches.id'), index=True)
+    
+    # Download details
+    download_type = db.Column(db.String(50), nullable=False)  # verified, unverified, rejected, all
+    
+    # File info
+    filename = db.Column(db.String(255), nullable=False)
+    file_path = db.Column(db.String(500), nullable=False)
+    file_size = db.Column(db.BigInteger)
+    
+    # Counts
+    record_count = db.Column(db.Integer, nullable=False)
+    
+    # Optional filters (JSON string)
+    filters = db.Column(db.Text)
+    
+    # Download tracking
+    downloaded_times = db.Column(db.Integer, default=1, nullable=False)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    last_downloaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Relationships
+    user = db.relationship('User', backref='guest_downloads', lazy='joined')
+    batch = db.relationship('Batch', backref='guest_downloads', lazy='joined')
+    
+    def __repr__(self):
+        return f'<GuestDownloadHistory {self.filename}>'
+
 class ActivityLog(db.Model):
     __tablename__ = 'activity_logs'
     

@@ -119,3 +119,44 @@ class SuppressionList(db.Model):
     
     def __repr__(self):
         return f'<SuppressionList {self.email}>'
+
+class GuestEmailItem(db.Model):
+    """
+    Tracks individual email items uploaded by guests.
+    Allows guests to see their complete uploaded list including duplicates.
+    """
+    __tablename__ = 'guest_email_items'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    batch_id = db.Column(db.Integer, db.ForeignKey('batches.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    
+    # Email details (denormalized for quick access)
+    email_normalized = db.Column(db.String(255), nullable=False, index=True)
+    domain = db.Column(db.String(255), nullable=False, index=True)
+    
+    # Processing result
+    result = db.Column(db.String(50), nullable=False, index=True)
+    # Results: inserted, duplicate, rejected
+    
+    # Link to main emails table (null if rejected)
+    matched_email_id = db.Column(db.Integer, db.ForeignKey('emails.id'), index=True)
+    
+    # Rejection details (if result=rejected)
+    rejected_reason = db.Column(db.String(100))
+    rejected_details = db.Column(db.Text)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Relationships
+    matched_email = db.relationship('Email', backref='guest_items', lazy='joined')
+    
+    __table_args__ = (
+        # Prevent duplicate items within same batch
+        db.UniqueConstraint('batch_id', 'email_normalized', name='uq_guest_batch_email'),
+        db.Index('idx_guest_user_batch', 'user_id', 'batch_id'),
+    )
+    
+    def __repr__(self):
+        return f'<GuestEmailItem {self.email_normalized} - {self.result}>'
