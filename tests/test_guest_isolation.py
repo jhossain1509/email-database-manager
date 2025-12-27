@@ -105,7 +105,7 @@ class TestGuestEmailItemModel:
             db.session.add(item1)
             db.session.commit()
             
-            # Try to create duplicate in same batch - should raise error
+            # Try to create duplicate in same batch - should raise IntegrityError
             item2 = GuestEmailItem(
                 batch_id=batch.id,
                 user_id=guest_user.id,
@@ -115,7 +115,8 @@ class TestGuestEmailItemModel:
             )
             db.session.add(item2)
             
-            with pytest.raises(Exception):
+            from sqlalchemy.exc import IntegrityError
+            with pytest.raises(IntegrityError):
                 db.session.commit()
 
 class TestGuestImportIsolation:

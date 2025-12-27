@@ -154,6 +154,7 @@ class GuestEmailItem(db.Model):
     
     __table_args__ = (
         # Prevent duplicate items within same batch
+        # (Allows same email in different batches, e.g., if uploaded by different guests)
         db.UniqueConstraint('batch_id', 'email_normalized', name='uq_guest_batch_email'),
         db.Index('idx_guest_user_batch', 'user_id', 'batch_id'),
     )

@@ -176,6 +176,7 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
                         # For guest users: Check if email already exists in main DB
                         if is_guest:
                             # Check if email already exists globally (case-insensitive)
+                            # TODO: Consider adding index on LOWER(email) for better performance
                             existing_email = Email.query.filter(
                                 db.func.lower(Email.email) == email.lower()
                             ).first()
@@ -235,8 +236,7 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
                                 is_validated=False
                             )
                             db.session.add(email_obj)
-                        
-                        imported_count += 1
+                            imported_count += 1
                     
                     # Update progress every 100 emails
                     if (idx + 1) % 100 == 0:
@@ -766,15 +766,15 @@ def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_
             if export_type == 'verified':
                 # Only items that link to validated & valid emails
                 query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
-                    .filter(Email.is_validated == True, Email.is_valid == True)
+                    .filter(Email.is_validated.is_(True), Email.is_valid.is_(True))
             elif export_type == 'unverified':
                 # Items linked to unvalidated emails
                 query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
-                    .filter(Email.is_validated == False)
+                    .filter(Email.is_validated.is_(False))
             elif export_type == 'invalid':
                 # Items linked to validated but invalid emails
                 query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
-                    .filter(Email.is_validated == True, Email.is_valid == False)
+                    .filter(Email.is_validated.is_(True), Email.is_valid.is_(False))
             elif export_type == 'rejected':
                 # Items with result=rejected
                 query = query.filter(GuestEmailItem.result == 'rejected')
