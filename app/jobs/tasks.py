@@ -182,7 +182,7 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
             batch.rejected_count = rejected_count  # Rejected emails
             batch.duplicate_count = duplicate_count  # Duplicate emails
             # Also update legacy fields for backward compatibility
-            batch.total_count = imported_count
+            batch.total_count = imported_count  # Legacy: same as imported_count
             batch.status = 'success'
             db.session.commit()
             

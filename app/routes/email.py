@@ -142,7 +142,13 @@ def batch_detail(batch_id):
         func.sum(db.case((Email.status == 'verified', 1), else_=0)).label('verified'),
         func.sum(db.case((Email.status == 'unverified', 1), else_=0)).label('unverified'),
         func.sum(db.case((Email.downloaded_at.isnot(None), 1), else_=0)).label('downloaded'),
-        func.sum(db.case((Email.downloaded_at.is_(None), 1), else_=0)).label('available')
+        func.sum(db.case((
+            db.and_(
+                Email.downloaded_at.is_(None),
+                Email.status.in_(['verified', 'unverified']),
+                Email.consent_granted == True,
+                Email.suppressed == False
+            ), 1), else_=0)).label('available')
     ).filter(
         Email.batch_id == batch_id
     ).group_by(Email.domain).order_by(desc('total')).limit(10).all()

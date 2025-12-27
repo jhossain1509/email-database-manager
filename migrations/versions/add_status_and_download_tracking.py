@@ -57,11 +57,14 @@ def upgrade():
     op.create_index('idx_status_downloaded', 'emails', ['status', 'downloaded_at'], unique=False)
     
     # Make email column unique (global unique constraint)
-    # First, remove duplicates if any exist
+    # First, remove duplicates if any exist, keeping the most recent one
     op.execute("""
-        DELETE FROM emails a USING emails b
-        WHERE a.id > b.id 
-        AND LOWER(a.email) = LOWER(b.email)
+        DELETE FROM emails
+        WHERE id NOT IN (
+            SELECT MAX(id)
+            FROM emails
+            GROUP BY LOWER(email)
+        )
     """)
     
     # Create unique index on lowercase email
