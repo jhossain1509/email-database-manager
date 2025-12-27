@@ -380,6 +380,16 @@ def export():
     ])
     
     domain_stats = []
+    
+    # Add Google_Valid category count first
+    google_valid_count = base_query.filter_by(domain_category='Google_Valid').count()
+    if google_valid_count > 0:
+        domain_stats.append({
+            'domain': 'Google_Valid',
+            'count': google_valid_count,
+            'category': 'Google_Valid'
+        })
+    
     for domain in TOP_DOMAINS:
         count = base_query.filter_by(domain=domain).count()
         if count > 0:

@@ -152,6 +152,40 @@ def classify_domain(domain):
     
     return 'mixed'
 
+def is_google_email(email):
+    """
+    Check if email is from Google/Gmail domains.
+    Returns True if the email is from gmail.com or googlemail.com
+    """
+    domain = extract_domain(email)
+    if not domain:
+        return False
+    
+    google_domains = ['gmail.com', 'googlemail.com']
+    return domain.lower() in google_domains
+
+def classify_domain_with_google_valid(domain, is_valid=False):
+    """
+    Classify domain with special handling for validated Google emails.
+    Returns 'Google_Valid' for valid Google/Gmail emails, otherwise uses standard classification.
+    
+    Args:
+        domain: The email domain
+        is_valid: Whether the email has been validated as valid
+    
+    Returns:
+        str: Domain category ('Google_Valid', domain name from TOP_DOMAINS, or 'mixed')
+    """
+    if is_valid and domain.lower() in ['gmail.com', 'googlemail.com']:
+        return 'Google_Valid'
+    
+    top_domains = current_app.config.get('TOP_DOMAINS', [])
+    
+    if domain.lower() in [d.lower() for d in top_domains]:
+        return domain.lower()
+    
+    return 'mixed'
+
 def validate_email_full(email, check_dns=False, check_role=False, ignore_domains=None):
     """
     Full email validation with multiple checks.
