@@ -65,14 +65,16 @@
                                         <span class="badge bg-secondary">{{ email.domain }}</span>
                                     </td>
                                     <td>
-                                        {% if email.is_validated %}
-                                            {% if email.is_valid %}
-                                                <span class="badge bg-success">Verified</span>
-                                            {% else %}
-                                                <span class="badge bg-danger">Invalid</span>
-                                            {% endif %}
-                                        {% else %}
+                                        {% if email.status == 'verified' %}
+                                            <span class="badge bg-success">Verified</span>
+                                        {% elif email.status == 'rejected' %}
+                                            <span class="badge bg-danger">Rejected</span>
+                                        {% elif email.status == 'unverified' %}
                                             <span class="badge bg-warning">Unverified</span>
+                                        {% elif email.status == 'suppressed' %}
+                                            <span class="badge bg-secondary">Suppressed</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Unknown</span>
                                         {% endif %}
                                     </td>
                                     <td>

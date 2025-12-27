@@ -41,36 +41,40 @@ def guest_dashboard():
     batches = Batch.query.filter_by(user_id=user_id).all()
     batch_ids = [b.id for b in batches]
     
-    # Statistics - only guest's own data
+    # Statistics - only guest's own data using new status field
     total_uploaded = Email.query.filter(
         Email.uploaded_by == user_id
     ).count()
     
+    # Total Verified: status='verified'
     total_verified = Email.query.filter(
         Email.uploaded_by == user_id,
-        Email.is_validated == True,
-        Email.is_valid == True
+        Email.status == 'verified'
     ).count()
     
+    # Total Unverified: status='unverified'
     total_unverified = Email.query.filter(
         Email.uploaded_by == user_id,
-        Email.is_validated == False
+        Email.status == 'unverified'
     ).count()
     
+    # Total Downloaded: downloaded_at IS NOT NULL
     total_downloaded = Email.query.filter(
         Email.uploaded_by == user_id,
-        Email.downloaded == True
+        Email.downloaded_at.isnot(None)
     ).count()
     
     total_rejected = RejectedEmail.query.filter(
         RejectedEmail.batch_id.in_(batch_ids) if batch_ids else False
     ).count()
     
+    # Available for Download: status IN ('verified','unverified') AND downloaded_at IS NULL
     available_download = Email.query.filter(
         Email.uploaded_by == user_id,
-        Email.is_validated == True,
-        Email.is_valid == True,
-        Email.downloaded == False
+        Email.status.in_(['verified', 'unverified']),
+        Email.downloaded_at.is_(None),
+        Email.consent_granted == True,
+        Email.suppressed == False
     ).count()
     
     # Recent jobs
@@ -120,11 +124,18 @@ def user_dashboard():
     
     # Check if admin for system-wide stats
     if current_user.is_admin():
-        # System-wide statistics
+        # System-wide statistics using new status field
         total_uploaded = Email.query.count()
-        total_verified = Email.query.filter_by(is_validated=True, is_valid=True).count()
-        total_unverified = Email.query.filter_by(is_validated=False).count()
-        total_downloaded = Email.query.filter_by(downloaded=True).count()
+        
+        # Total Verified: status='verified'
+        total_verified = Email.query.filter_by(status='verified').count()
+        
+        # Total Unverified: status='unverified'
+        total_unverified = Email.query.filter_by(status='unverified').count()
+        
+        # Total Downloaded: downloaded_at IS NOT NULL
+        total_downloaded = Email.query.filter(Email.downloaded_at.isnot(None)).count()
+        
         total_rejected = RejectedEmail.query.count()
         
         # Recent jobs - all users
@@ -135,9 +146,16 @@ def user_dashboard():
     else:
         # User can see main DB stats but recent activity is limited
         total_uploaded = Email.query.count()
-        total_verified = Email.query.filter_by(is_validated=True, is_valid=True).count()
-        total_unverified = Email.query.filter_by(is_validated=False).count()
-        total_downloaded = Email.query.filter_by(downloaded=True).count()
+        
+        # Total Verified: status='verified'
+        total_verified = Email.query.filter_by(status='verified').count()
+        
+        # Total Unverified: status='unverified'
+        total_unverified = Email.query.filter_by(status='unverified').count()
+        
+        # Total Downloaded: downloaded_at IS NOT NULL
+        total_downloaded = Email.query.filter(Email.downloaded_at.isnot(None)).count()
+        
         total_rejected = RejectedEmail.query.count()
         
         # Recent jobs - own jobs
@@ -152,10 +170,12 @@ def user_dashboard():
             .limit(10)\
             .all()
     
-    available_download = Email.query.filter_by(
-        is_validated=True,
-        is_valid=True,
-        downloaded=False
+    # Available for Download: status IN ('verified','unverified') AND downloaded_at IS NULL
+    available_download = Email.query.filter(
+        Email.status.in_(['verified', 'unverified']),
+        Email.downloaded_at.is_(None),
+        Email.consent_granted == True,
+        Email.suppressed == False
     ).count()
     
     # Top domains from entire DB
