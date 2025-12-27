@@ -3,7 +3,8 @@ from app import db
 from app.models.email import Email, Batch, RejectedEmail, IgnoreDomain, SuppressionList
 from app.models.job import Job, DomainReputation, DownloadHistory
 from app.utils.email_validator import (
-    validate_email_full, extract_domain, classify_domain
+    validate_email_full, extract_domain, classify_domain,
+    classify_domain_with_google_valid
 )
 import csv
 import os
@@ -254,6 +255,11 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                         invalid_count += 1
                     else:
                         valid_count += 1
+                        # Update domain_category for valid Google/Gmail emails
+                        email_obj.domain_category = classify_domain_with_google_valid(
+                            email_obj.domain, 
+                            is_valid=True
+                        )
                     
                     # Update progress every 50 emails
                     if (idx + 1) % 50 == 0:
@@ -368,14 +374,39 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
             emails_to_export = []
             
             if domain_limits:
-                # Export specific domains with limits
-                for domain, limit in domain_limits.items():
-                    domain_query = query.filter_by(domain=domain)
+                # Export specific domains/categories with limits
+                for domain_or_category, limit in domain_limits.items():
+                    # Check if it's a special category like 'Google_Valid'
+                    if domain_or_category == 'Google_Valid' or domain_or_category in ['mixed']:
+                        domain_query = query.filter_by(domain_category=domain_or_category)
+                    else:
+                        domain_query = query.filter_by(domain=domain_or_category)
                     domain_emails = domain_query.limit(limit).all()
                     emails_to_export.extend(domain_emails)
             elif filter_domains:
-                # Export all from specified domains (backward compatibility)
-                query = query.filter(Email.domain.in_(filter_domains))
+                # Export all from specified domains/categories (backward compatibility)
+                # Support both domain names and special categories
+                domain_filters = []
+                category_filters = []
+                for item in filter_domains:
+                    if item == 'Google_Valid' or item == 'mixed':
+                        category_filters.append(item)
+                    else:
+                        domain_filters.append(item)
+                
+                if domain_filters and category_filters:
+                    # Filter by both domain and category
+                    query = query.filter(
+                        db.or_(
+                            Email.domain.in_(domain_filters),
+                            Email.domain_category.in_(category_filters)
+                        )
+                    )
+                elif domain_filters:
+                    query = query.filter(Email.domain.in_(domain_filters))
+                elif category_filters:
+                    query = query.filter(Email.domain_category.in_(category_filters))
+                
                 emails_to_export = query.all()
             else:
                 # Export all matching query

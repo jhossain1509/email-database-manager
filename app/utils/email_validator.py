@@ -7,6 +7,9 @@ from flask import current_app
 # Initialize public suffix list
 psl = publicsuffix2.PublicSuffixList()
 
+# Google email domains constant
+GOOGLE_EMAIL_DOMAINS = ['gmail.com', 'googlemail.com']
+
 def is_valid_email_syntax(email):
     """Check if email has valid syntax"""
     try:
@@ -145,6 +148,39 @@ def check_us_only_cctld_policy(email):
 
 def classify_domain(domain):
     """Classify domain into TOP_DOMAINS or 'mixed'"""
+    top_domains = current_app.config.get('TOP_DOMAINS', [])
+    
+    if domain.lower() in [d.lower() for d in top_domains]:
+        return domain.lower()
+    
+    return 'mixed'
+
+def is_google_email(email):
+    """
+    Check if email is from Google/Gmail domains.
+    Returns True if the email is from gmail.com or googlemail.com
+    """
+    domain = extract_domain(email)
+    if not domain:
+        return False
+    
+    return domain.lower() in GOOGLE_EMAIL_DOMAINS
+
+def classify_domain_with_google_valid(domain, is_valid=False):
+    """
+    Classify domain with special handling for validated Google emails.
+    Returns 'Google_Valid' for valid Google/Gmail emails, otherwise uses standard classification.
+    
+    Args:
+        domain: The email domain
+        is_valid: Whether the email has been validated as valid
+    
+    Returns:
+        str: Domain category ('Google_Valid', domain name from TOP_DOMAINS, or 'mixed')
+    """
+    if is_valid and domain.lower() in GOOGLE_EMAIL_DOMAINS:
+        return 'Google_Valid'
+    
     top_domains = current_app.config.get('TOP_DOMAINS', [])
     
     if domain.lower() in [d.lower() for d in top_domains]:
