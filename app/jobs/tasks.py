@@ -86,6 +86,21 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
                     
                     seen_emails.add(email)
                     
+                    # Check if email already exists in database (global unique constraint)
+                    existing_email = Email.query.filter(db.func.lower(Email.email) == email.lower()).first()
+                    if existing_email:
+                        duplicate_count += 1
+                        rejected = RejectedEmail(
+                            email=email,
+                            domain=extract_domain(email) or 'unknown',
+                            reason='duplicate',
+                            details='Email already exists in database',
+                            batch_id=batch_id,
+                            job_id=job.id
+                        )
+                        db.session.add(rejected)
+                        continue
+                    
                     # Check if in suppression list
                     if email in suppressed_emails:
                         rejected_count += 1
@@ -123,7 +138,7 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
                         )
                         db.session.add(rejected)
                     else:
-                        # Import email
+                        # Import email with status='unverified' by default
                         domain_category = classify_domain(domain)
                         
                         email_obj = Email(
@@ -133,6 +148,7 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
                             batch_id=batch_id,
                             uploaded_by=user_id,
                             consent_granted=consent_granted,
+                            status='unverified',  # Default status
                             is_validated=False
                         )
                         db.session.add(email_obj)
@@ -160,11 +176,14 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
             # Final commit
             db.session.commit()
             
-            # Update batch statistics
+            # Update batch statistics with new field names
+            batch.total_rows = len(emails_to_process)  # Total input lines
+            batch.imported_count = imported_count  # Successfully inserted
+            batch.rejected_count = rejected_count  # Rejected emails
+            batch.duplicate_count = duplicate_count  # Duplicate emails
+            # Also update legacy fields for backward compatibility
             batch.total_count = imported_count
-            batch.rejected_count = rejected_count
-            batch.duplicate_count = duplicate_count
-            batch.status = 'uploaded'
+            batch.status = 'success'
             db.session.commit()
             
             # Complete job
@@ -252,8 +271,12 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                     
                     if not is_valid:
                         email_obj.validation_error = f'{error_type}: {error_message}'
+                        email_obj.status = 'rejected'  # Set status to rejected
+                        email_obj.rejected_reason = error_type
                         invalid_count += 1
                     else:
+                        email_obj.status = 'verified'  # Set status to verified
+                        email_obj.verified_at = datetime.utcnow()  # Set verified timestamp
                         valid_count += 1
                         # Update domain_category for valid Google/Gmail emails
                         email_obj.domain_category = classify_domain_with_google_valid(
@@ -353,22 +376,23 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
             job.started_at = datetime.utcnow()
             db.session.commit()
             
-            # Build base query
-            query = Email.query
+            # Build base query - only include emails that haven't been downloaded
+            query = Email.query.filter(Email.downloaded_at.is_(None))  # No double download
             
             if batch_id:
                 query = query.filter_by(batch_id=batch_id)
             
+            # Use new status field for filtering
             if export_type == 'verified':
-                query = query.filter_by(is_validated=True, is_valid=True)
+                query = query.filter_by(status='verified')
             elif export_type == 'unverified':
-                query = query.filter_by(is_validated=False)
-            elif export_type == 'invalid':
-                query = query.filter_by(is_validated=True, is_valid=False)
-            # 'all' exports everything
+                query = query.filter_by(status='unverified')
+            elif export_type == 'invalid' or export_type == 'rejected':
+                query = query.filter_by(status='rejected')
+            # 'all' exports everything that hasn't been downloaded
             
-            # Get suppression list
-            suppressed = set([s.email for s in SuppressionList.query.all()])
+            # Apply compliance filters
+            query = query.filter_by(consent_granted=True, suppressed=False)
             
             # Collect emails by domain if domain_limits specified
             emails_to_export = []
@@ -445,7 +469,7 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
                     file_path = os.path.join(export_folder, filename)
                     file_paths.append((filename, file_path))
                     
-                    chunk_count = _write_export_file(chunk, file_path, fields, export_format, suppressed)
+                    chunk_count = _write_export_file(chunk, file_path, fields, export_format, set())
                     file_counts.append(chunk_count)
                     exported_count += chunk_count
                     file_number += 1
@@ -461,15 +485,16 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
                 file_paths.append((filename, file_path))
                 
                 exported_count = _write_export_file(
-                    emails_to_export, file_path, fields, export_format, suppressed, job, self
+                    emails_to_export, file_path, fields, export_format, set(), job, self
                 )
                 file_counts.append(exported_count)
             
-            # Mark emails as downloaded
+            # Mark emails as downloaded with timestamp (downloaded_at = NOW())
+            download_timestamp = datetime.utcnow()
             for email_obj in emails_to_export:
-                if email_obj.email not in suppressed:
-                    email_obj.downloaded = True
-                    email_obj.download_count += 1
+                email_obj.downloaded_at = download_timestamp  # New field
+                email_obj.downloaded = True  # Legacy field for backward compatibility
+                email_obj.download_count += 1
             db.session.commit()
             
             # Create download history entries
