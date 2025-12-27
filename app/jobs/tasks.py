@@ -3,7 +3,8 @@ from app import db
 from app.models.email import Email, Batch, RejectedEmail, IgnoreDomain, SuppressionList
 from app.models.job import Job, DomainReputation, DownloadHistory
 from app.utils.email_validator import (
-    validate_email_full, extract_domain, classify_domain
+    validate_email_full, extract_domain, classify_domain,
+    classify_domain_with_google_valid
 )
 import csv
 import os
@@ -255,7 +256,6 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                     else:
                         valid_count += 1
                         # Update domain_category for valid Google/Gmail emails
-                        from app.utils.email_validator import classify_domain_with_google_valid
                         email_obj.domain_category = classify_domain_with_google_valid(
                             email_obj.domain, 
                             is_valid=True

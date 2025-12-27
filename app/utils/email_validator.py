@@ -7,6 +7,9 @@ from flask import current_app
 # Initialize public suffix list
 psl = publicsuffix2.PublicSuffixList()
 
+# Google email domains constant
+GOOGLE_EMAIL_DOMAINS = ['gmail.com', 'googlemail.com']
+
 def is_valid_email_syntax(email):
     """Check if email has valid syntax"""
     try:
@@ -161,8 +164,7 @@ def is_google_email(email):
     if not domain:
         return False
     
-    google_domains = ['gmail.com', 'googlemail.com']
-    return domain.lower() in google_domains
+    return domain.lower() in GOOGLE_EMAIL_DOMAINS
 
 def classify_domain_with_google_valid(domain, is_valid=False):
     """
@@ -176,7 +178,7 @@ def classify_domain_with_google_valid(domain, is_valid=False):
     Returns:
         str: Domain category ('Google_Valid', domain name from TOP_DOMAINS, or 'mixed')
     """
-    if is_valid and domain.lower() in ['gmail.com', 'googlemail.com']:
+    if is_valid and domain.lower() in GOOGLE_EMAIL_DOMAINS:
         return 'Google_Valid'
     
     top_domains = current_app.config.get('TOP_DOMAINS', [])
