@@ -225,3 +225,38 @@ class ScheduledReport(db.Model):
     
     def __repr__(self):
         return f'<ScheduledReport {self.name}>'
+
+
+class SMTPConfig(db.Model):
+    """SMTP Configuration for email validation"""
+    __tablename__ = 'smtp_configs'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)  # Config name/label
+    
+    # SMTP Server settings
+    smtp_host = db.Column(db.String(255), nullable=False)
+    smtp_port = db.Column(db.Integer, default=25, nullable=False)
+    smtp_username = db.Column(db.String(255))
+    smtp_password = db.Column(db.String(255))  # Encrypted in production
+    use_tls = db.Column(db.Boolean, default=False, nullable=False)
+    use_ssl = db.Column(db.Boolean, default=False, nullable=False)
+    
+    # Validation settings
+    from_email = db.Column(db.String(255), nullable=False)  # MAIL FROM address
+    timeout = db.Column(db.Integer, default=10, nullable=False)  # seconds
+    
+    # Status
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    is_default = db.Column(db.Boolean, default=False, nullable=False)
+    last_tested = db.Column(db.DateTime)
+    test_status = db.Column(db.String(50))  # success, failed, pending
+    test_message = db.Column(db.Text)
+    
+    # Metadata
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    
+    def __repr__(self):
+        return f'<SMTPConfig {self.name}>'

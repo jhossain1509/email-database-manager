@@ -361,7 +361,7 @@ def delete_invalid_emails():
             batch_id=batch_id,
             is_validated=True,
             is_valid=False
-        ).delete()
+        ).delete(synchronize_session='fetch')
         
         batch = Batch.query.get(batch_id)
         batch_name = batch.name if batch else f"Batch {batch_id}"
@@ -371,7 +371,7 @@ def delete_invalid_emails():
         flash(f'Deleted {deleted} invalid emails from {batch_name}.', 'success')
     else:
         # Delete all invalid emails
-        deleted = Email.query.filter_by(is_validated=True, is_valid=False).delete()
+        deleted = Email.query.filter_by(is_validated=True, is_valid=False).delete(synchronize_session='fetch')
         db.session.commit()
         
         log_activity('admin_action', f'Deleted {deleted} invalid emails from all batches')
@@ -389,7 +389,7 @@ def delete_rejected_emails():
     
     if batch_id:
         # Delete rejected emails from specific batch
-        deleted = RejectedEmail.query.filter_by(batch_id=batch_id).delete()
+        deleted = RejectedEmail.query.filter_by(batch_id=batch_id).delete(synchronize_session='fetch')
         
         batch = Batch.query.get(batch_id)
         batch_name = batch.name if batch else f"Batch {batch_id}"
@@ -399,7 +399,7 @@ def delete_rejected_emails():
         flash(f'Deleted {deleted} rejected emails from {batch_name}.', 'success')
     else:
         # Delete all rejected emails
-        deleted = RejectedEmail.query.delete()
+        deleted = RejectedEmail.query.delete(synchronize_session='fetch')
         db.session.commit()
         
         log_activity('admin_action', f'Deleted {deleted} rejected emails from all batches')
@@ -421,9 +421,9 @@ def delete_invalid_and_rejected():
             batch_id=batch_id,
             is_validated=True,
             is_valid=False
-        ).delete()
+        ).delete(synchronize_session='fetch')
         
-        rejected_deleted = RejectedEmail.query.filter_by(batch_id=batch_id).delete()
+        rejected_deleted = RejectedEmail.query.filter_by(batch_id=batch_id).delete(synchronize_session='fetch')
         
         batch = Batch.query.get(batch_id)
         batch_name = batch.name if batch else f"Batch {batch_id}"
@@ -435,8 +435,8 @@ def delete_invalid_and_rejected():
         flash(f'Deleted {total} emails ({invalid_deleted} invalid, {rejected_deleted} rejected) from {batch_name}.', 'success')
     else:
         # Delete all
-        invalid_deleted = Email.query.filter_by(is_validated=True, is_valid=False).delete()
-        rejected_deleted = RejectedEmail.query.delete()
+        invalid_deleted = Email.query.filter_by(is_validated=True, is_valid=False).delete(synchronize_session='fetch')
+        rejected_deleted = RejectedEmail.query.delete(synchronize_session='fetch')
         
         db.session.commit()
         
