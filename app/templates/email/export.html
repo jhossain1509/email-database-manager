@@ -207,6 +207,66 @@ function updateDomainCounts() {
     });
 }
 
+async function updateDomainStatsByBatch() {
+    const batchId = document.getElementById('batch_id').value;
+    const exportType = document.getElementById('export_type').value;
+    
+    // If no batch selected, just update counts normally
+    if (!batchId) {
+        updateDomainCounts();
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/export/domain-stats?batch_id=${batchId}&export_type=${exportType}`);
+        const data = await response.json();
+        
+        if (data.error) {
+            console.error('Error fetching domain stats:', data.error);
+            return;
+        }
+        
+        // Update domain counts based on API response
+        const domainCounts = document.querySelectorAll('.domain-count');
+        domainCounts.forEach(badge => {
+            const domain = badge.dataset.domain;
+            const stat = data.domain_stats.find(s => s.domain === domain);
+            
+            if (stat) {
+                badge.textContent = stat.count + ' available';
+                
+                // Update limit input max value
+                const limitInput = document.getElementById('limit_' + domain);
+                if (limitInput) {
+                    limitInput.max = stat.count;
+                    // Clear value if it exceeds new max
+                    if (limitInput.value && parseInt(limitInput.value) > stat.count) {
+                        limitInput.value = stat.count;
+                    }
+                }
+            } else {
+                // Domain not available in this batch
+                badge.textContent = '0 available';
+                const limitInput = document.getElementById('limit_' + domain);
+                if (limitInput) {
+                    limitInput.max = 0;
+                    limitInput.value = '';
+                    limitInput.disabled = true;
+                }
+                // Uncheck the checkbox
+                const checkbox = document.querySelector(`.domain-checkbox[data-domain="${domain}"]`);
+                if (checkbox) {
+                    checkbox.checked = false;
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error updating domain stats:', error);
+        // Fallback to local update
+        updateDomainCounts();
+    }
+}
+
 function prepareDomainLimits() {
     const checkboxes = document.querySelectorAll('.domain-checkbox:checked');
     const limits = [];
@@ -237,7 +297,19 @@ function prepareDomainLimits() {
 }
 
 // Update domain counts when export type changes
-document.getElementById('export_type').addEventListener('change', updateDomainCounts);
+document.getElementById('export_type').addEventListener('change', function() {
+    const batchId = document.getElementById('batch_id').value;
+    if (batchId) {
+        updateDomainStatsByBatch();
+    } else {
+        updateDomainCounts();
+    }
+});
+
+// Update domain counts when batch changes
+document.getElementById('batch_id').addEventListener('change', function() {
+    updateDomainStatsByBatch();
+});
 
 // Hide custom fields when TXT format is selected
 document.getElementById('export_format').addEventListener('change', function() {
