@@ -12,17 +12,16 @@ bp = Blueprint('api', __name__, url_prefix='/api')
 def stats():
     """Get dashboard statistics"""
     if current_user.is_guest():
-        # Guest stats
+        # Guest stats using new status field
         total_uploaded = Email.query.filter_by(uploaded_by=current_user.id).count()
         total_verified = Email.query.filter(
             Email.uploaded_by == current_user.id,
-            Email.is_validated == True,
-            Email.is_valid == True
+            Email.status == 'verified'
         ).count()
     else:
-        # Main DB stats
+        # Main DB stats using new status field
         total_uploaded = Email.query.count()
-        total_verified = Email.query.filter_by(is_validated=True, is_valid=True).count()
+        total_verified = Email.query.filter_by(status='verified').count()
     
     return jsonify({
         'total_uploaded': total_uploaded,
@@ -43,11 +42,14 @@ def batch_stats(batch_id):
         'id': batch.id,
         'name': batch.name,
         'status': batch.status,
+        'total_rows': batch.total_rows,
+        'imported_count': batch.imported_count,
+        'rejected_count': batch.rejected_count,
+        'duplicate_count': batch.duplicate_count,
+        # Also include legacy fields for backward compatibility
         'total_count': batch.total_count,
         'valid_count': batch.valid_count,
-        'invalid_count': batch.invalid_count,
-        'rejected_count': batch.rejected_count,
-        'duplicate_count': batch.duplicate_count
+        'invalid_count': batch.invalid_count
     })
 
 @bp.route('/check-file/<int:batch_id>')
