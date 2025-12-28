@@ -529,6 +529,7 @@ def smtp_config():
                         smtp_port=int(port.strip()),
                         smtp_username=username.strip(),
                         smtp_password=password.strip(),
+                        from_email=username.strip(),  # Use SMTP username as from_email
                         use_tls=int(port.strip()) == 587,
                         use_ssl=int(port.strip()) == 465,
                         timeout=30,
@@ -575,6 +576,7 @@ def smtp_config():
             config.smtp_port = int(request.form.get('smtp_port', 25))
             config.smtp_username = request.form.get('smtp_username')
             config.smtp_password = request.form.get('smtp_password')
+            config.from_email = request.form.get('from_email') or request.form.get('smtp_username')  # Use username as fallback
             config.use_tls = request.form.get('use_tls') == 'on'
             config.use_ssl = request.form.get('use_ssl') == 'on'
             config.timeout = int(request.form.get('timeout', 30))
