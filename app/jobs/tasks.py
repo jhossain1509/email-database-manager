@@ -305,7 +305,7 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
 
 @shared_task(bind=True)
 def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=False, check_disposable=True, 
-                        validate_all_unverified=False, filter_domains=''):
+                        validate_all_unverified=False, filter_domains='', use_smtp=False):
     """
     Validate emails in a batch with enhanced validation.
     Job-driven with progress reporting.
@@ -321,8 +321,14 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
         check_disposable: Whether to check for disposable emails
         validate_all_unverified: Whether to validate all unverified emails
         filter_domains: Comma-separated list of domains to filter
+        use_smtp: Whether to use SMTP verification (requires SMTP servers configured)
     """
     from app import create_app
+    from app.models.job import SMTPConfig
+    from app.utils.email_validator import verify_email_smtp
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from datetime import datetime as dt
+    
     app = create_app()
     
     with app.app_context():
@@ -347,6 +353,26 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
             # Check if user is guest
             user = User.query.get(user_id)
             is_guest = user.is_guest() if user else False
+            
+            # Check SMTP permission for guests
+            if use_smtp and is_guest and not (user and user.smtp_verification_allowed):
+                raise Exception('Guest user does not have SMTP verification permission')
+            
+            # Get SMTP servers if use_smtp is enabled
+            smtp_servers = []
+            if use_smtp:
+                smtp_configs = SMTPConfig.query.filter_by(is_active=True).order_by(
+                    SMTPConfig.last_used_at.asc().nullsfirst()
+                ).all()
+                
+                if not smtp_configs:
+                    # Fallback to DNS validation if no SMTP servers
+                    use_smtp = False
+                    check_dns = True
+                else:
+                    smtp_servers = smtp_configs
+                    # Get thread count from first config (they should all have same setting)
+                    thread_count = smtp_configs[0].thread_count if smtp_configs else 5
             
             # Get ignore domains
             ignore_domains = [d.domain for d in IgnoreDomain.query.all()]
@@ -433,49 +459,119 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
             
             from app.utils.email_validator import validate_email_enhanced
             
-            for idx, email_obj in enumerate(emails):
-                try:
-                    # Enhanced validation with quality scoring
-                    is_valid, error_type, error_message, quality_score, details = validate_email_enhanced(
+            if use_smtp and smtp_servers:
+                # SMTP validation with threading and rotation
+                def validate_with_smtp(email_obj, smtp_server_idx):
+                    """Validate single email using SMTP"""
+                    smtp_server = smtp_servers[smtp_server_idx % len(smtp_servers)]
+                    
+                    is_valid, error_code, error_message = verify_email_smtp(
                         email_obj.email,
-                        check_dns=check_dns,
-                        check_smtp=False,  # SMTP check is slow, keep disabled
-                        check_role=check_role,
-                        check_disposable=check_disposable,
-                        ignore_domains=ignore_domains
+                        smtp_server.smtp_host,
+                        smtp_server.smtp_port,
+                        smtp_server.smtp_username,
+                        smtp_server.smtp_password,
+                        use_tls=smtp_server.use_tls,
+                        use_ssl=smtp_server.use_ssl,
+                        timeout=smtp_server.timeout or 30,
+                        from_email=smtp_server.from_email
                     )
                     
-                    email_obj.is_validated = True
-                    email_obj.is_valid = is_valid
-                    email_obj.quality_score = quality_score
+                    # Update last used timestamp for rotation
+                    smtp_server.last_used_at = dt.utcnow()
                     
-                    if not is_valid:
-                        email_obj.validation_error = f'{error_type}: {error_message}'
-                        invalid_count += 1
-                    else:
-                        valid_count += 1
-                    
-                    # Update progress every 50 emails
-                    if (idx + 1) % 50 == 0:
-                        job.update_progress(idx + 1)
-                        db.session.commit()
-                        
-                        self.update_state(
-                            state='PROGRESS',
-                            meta={
-                                'current': idx + 1,
-                                'total': job.total,
-                                'percent': job.progress_percent
-                            }
-                        )
+                    return email_obj, is_valid, error_code, error_message
                 
-                except Exception as e:
-                    job.errors += 1
-                    email_obj.is_validated = True
-                    email_obj.is_valid = False
-                    email_obj.validation_error = f'Validation error: {str(e)}'
-                    email_obj.quality_score = 0
-                    invalid_count += 1
+                # Use ThreadPoolExecutor for concurrent SMTP validation
+                with ThreadPoolExecutor(max_workers=thread_count) as executor:
+                    futures = []
+                    for idx, email_obj in enumerate(emails):
+                        # Round-robin server selection
+                        future = executor.submit(validate_with_smtp, email_obj, idx)
+                        futures.append(future)
+                    
+                    # Process results as they complete
+                    completed = 0
+                    for future in as_completed(futures):
+                        try:
+                            email_obj, is_valid, error_code, error_message = future.result()
+                            
+                            email_obj.is_validated = True
+                            email_obj.is_valid = is_valid
+                            email_obj.quality_score = 100 if is_valid else 0
+                            
+                            if not is_valid:
+                                email_obj.validation_error = f'SMTP: {error_message}' if error_message else 'Invalid'
+                                invalid_count += 1
+                            else:
+                                valid_count += 1
+                            
+                            completed += 1
+                            
+                            # Update progress every 50 emails
+                            if completed % 50 == 0:
+                                job.update_progress(completed)
+                                db.session.commit()
+                                
+                                self.update_state(
+                                    state='PROGRESS',
+                                    meta={
+                                        'current': completed,
+                                        'total': job.total,
+                                        'percent': job.progress_percent
+                                    }
+                                )
+                        except Exception as e:
+                            job.errors += 1
+                            print(f"SMTP validation error: {str(e)}")
+                
+                # Update SMTP server timestamps
+                db.session.commit()
+            else:
+                # Standard validation (DNS/MX)
+                for idx, email_obj in enumerate(emails):
+                    try:
+                        # Enhanced validation with quality scoring
+                        is_valid, error_type, error_message, quality_score, details = validate_email_enhanced(
+                            email_obj.email,
+                            check_dns=check_dns,
+                            check_smtp=False,  # SMTP check is slow, keep disabled
+                            check_role=check_role,
+                            check_disposable=check_disposable,
+                            ignore_domains=ignore_domains
+                        )
+                        
+                        email_obj.is_validated = True
+                        email_obj.is_valid = is_valid
+                        email_obj.quality_score = quality_score
+                        
+                        if not is_valid:
+                            email_obj.validation_error = f'{error_type}: {error_message}'
+                            invalid_count += 1
+                        else:
+                            valid_count += 1
+                        
+                        # Update progress every 50 emails
+                        if (idx + 1) % 50 == 0:
+                            job.update_progress(idx + 1)
+                            db.session.commit()
+                            
+                            self.update_state(
+                                state='PROGRESS',
+                                meta={
+                                    'current': idx + 1,
+                                    'total': job.total,
+                                    'percent': job.progress_percent
+                                }
+                            )
+                    
+                    except Exception as e:
+                        job.errors += 1
+                        email_obj.is_validated = True
+                        email_obj.is_valid = False
+                        email_obj.validation_error = f'Validation error: {str(e)}'
+                        email_obj.quality_score = 0
+                        invalid_count += 1
             
             # Final commit
             db.session.commit()
@@ -644,23 +740,62 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
                     email_obj.download_count += 1
             db.session.commit()
             
-            # Create download history entries
-            history_ids = []
-            for idx, (filename, file_path) in enumerate(file_paths):
-                file_size = os.path.getsize(file_path)
+            # If split files, create ZIP archive
+            final_file_path = None
+            final_filename = None
+            final_file_size = 0
+            
+            if split_files and len(file_paths) > 1:
+                # Create ZIP file containing all parts
+                zip_filename = f"export_{export_type}_{user_id}_{timestamp}.zip"
+                zip_path = os.path.join(export_folder, zip_filename)
+                
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for filename, file_path in file_paths:
+                        zipf.write(file_path, filename)
+                        # Delete individual files after adding to ZIP
+                        try:
+                            os.remove(file_path)
+                        except:
+                            pass
+                
+                final_file_path = zip_path
+                final_filename = zip_filename
+                final_file_size = os.path.getsize(zip_path)
+                
+                # Create single download history entry for ZIP
                 history = DownloadHistory(
                     user_id=user_id,
                     batch_id=batch_id,
                     download_type=export_type,
                     filter_domains=','.join(filter_domains) if filter_domains else None,
-                    filename=filename,
-                    file_path=file_path,
-                    file_size=file_size,
-                    record_count=file_counts[idx]
+                    filename=final_filename,
+                    file_path=final_file_path,
+                    file_size=final_file_size,
+                    record_count=exported_count
                 )
                 db.session.add(history)
                 db.session.flush()
-                history_ids.append(history.id)
+                history_ids = [history.id]
+            else:
+                # Create download history entries for single or non-split files
+                history_ids = []
+                for idx, (filename, file_path) in enumerate(file_paths):
+                    file_size = os.path.getsize(file_path)
+                    history = DownloadHistory(
+                        user_id=user_id,
+                        batch_id=batch_id,
+                        download_type=export_type,
+                        filter_domains=','.join(filter_domains) if filter_domains else None,
+                        filename=filename,
+                        file_path=file_path,
+                        file_size=file_size,
+                        record_count=file_counts[idx]
+                    )
+                    db.session.add(history)
+                    db.session.flush()
+                    history_ids.append(history.id)
+            
             db.session.commit()
             
             # Complete job
