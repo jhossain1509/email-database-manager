@@ -625,7 +625,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
 @shared_task(bind=True)
 def export_emails_task(self, user_id, export_type='verified', batch_id=None, filter_domains=None, 
                        domain_limits=None, split_files=False, split_size=10000, 
-                       export_format='csv', custom_fields=None):
+                       export_format='csv', custom_fields=None, random_limit=None):
     """
     Export emails with advanced filtering and options.
     Job-driven with progress reporting.
@@ -640,6 +640,7 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
         split_size: Number of records per split file
         export_format: 'csv' or 'txt'
         custom_fields: List of fields to export (for CSV)
+        random_limit: Optional limit to random sample of N emails
     """
     from app import create_app
     app = create_app()
@@ -697,7 +698,17 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
                 emails_to_export = query.all()
             else:
                 # Export all matching query
-                emails_to_export = query.all()
+                # If random_limit is specified, use random sampling
+                if random_limit and random_limit > 0:
+                    from sqlalchemy import func
+                    total_count = query.count()
+                    if total_count > random_limit:
+                        # Use ORDER BY RANDOM() with LIMIT for random sampling
+                        emails_to_export = query.order_by(func.random()).limit(random_limit).all()
+                    else:
+                        emails_to_export = query.all()
+                else:
+                    emails_to_export = query.all()
             
             job.total = len(emails_to_export)
             db.session.commit()
@@ -927,7 +938,7 @@ def _write_export_file(emails, file_path, fields, export_format, suppressed, job
 
 
 @shared_task(bind=True)
-def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_format='csv', custom_fields=None):
+def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_format='csv', custom_fields=None, random_limit=None):
     """
     Export emails for guest users from their GuestEmailItem scope.
     Does NOT update emails.downloaded or emails.download_count.
@@ -939,6 +950,7 @@ def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_
         export_type: 'verified', 'smtp_verified', 'unverified', 'invalid', 'rejected', or 'all'
         export_format: 'csv' or 'txt'
         custom_fields: List of fields to export (for CSV)
+        random_limit: Optional limit to random sample of N emails
     """
     from app import create_app
     app = create_app()
@@ -994,6 +1006,14 @@ def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_
                 # Items with result=rejected
                 query = query.filter(GuestEmailItem.result == 'rejected')
             # 'all' exports everything
+            
+            # Apply random limit if specified
+            if random_limit and random_limit > 0:
+                from sqlalchemy import func
+                total_count = query.count()
+                if total_count > random_limit:
+                    # Use ORDER BY RANDOM() with LIMIT for random sampling
+                    query = query.order_by(func.random()).limit(random_limit)
             
             # Get items to export (eager load matched_email for efficiency)
             from sqlalchemy.orm import joinedload

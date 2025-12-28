@@ -366,6 +366,10 @@ def export():
         split_size = request.form.get('split_size', 10000, type=int)
         custom_fields = request.form.get('custom_fields', '').strip()
         
+        # Random limit parameter
+        enable_random_limit = request.form.get('enable_random_limit') == 'on'
+        random_limit = request.form.get('random_limit', type=int) if enable_random_limit else None
+        
         # Check batch access for guest users
         if batch_id:
             batch = Batch.query.get(batch_id)
@@ -390,7 +394,8 @@ def export():
                 batch_id,
                 export_type,
                 export_format,
-                fields_list
+                fields_list,
+                random_limit  # Add random_limit parameter
             )
         else:
             # Regular users use normal export
@@ -425,7 +430,8 @@ def export():
                 split_files,
                 split_size,
                 export_format,
-                fields_list
+                fields_list,
+                random_limit  # Add random_limit parameter
             )
         
         # Create job record

@@ -37,6 +37,25 @@
                             {% endif %}
                         </div>
                         
+                        <!-- Random Sample Limit -->
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="enable_random_limit" name="enable_random_limit" onchange="toggleRandomLimit()">
+                                <label class="form-check-label" for="enable_random_limit">
+                                    Limit to Random Sample
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3" id="random_limit_section" style="display: none;">
+                            <label for="random_limit" class="form-label">Number of Emails to Export</label>
+                            <input type="number" class="form-control" id="random_limit" name="random_limit" 
+                                   value="5000" min="1" max="1000000" placeholder="e.g., 5000">
+                            <small class="form-text text-muted">
+                                Random sample will be selected from all available emails. Works with split files option.
+                            </small>
+                        </div>
+                        
                         <!-- Domain Filtering with Limits -->
                         <div class="mb-3">
                             <label class="form-label">Filter by Domains with Limits</label>
@@ -169,6 +188,11 @@ function toggleDomainLimit(checkbox) {
 function toggleSplitSize() {
     const splitFiles = document.getElementById('split_files').checked;
     document.getElementById('split_size_section').style.display = splitFiles ? 'block' : 'none';
+}
+
+function toggleRandomLimit() {
+    const enableRandomLimit = document.getElementById('enable_random_limit').checked;
+    document.getElementById('random_limit_section').style.display = enableRandomLimit ? 'block' : 'none';
 }
 
 function updateDomainCounts() {
