@@ -1,0 +1,192 @@
+{% extends "layouts/base.html" %}
+{% block title %}Admin - SMTP Configuration{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+    <h2><i class="bi bi-envelope-at"></i> SMTP Configuration</h2>
+    
+    <div class="alert alert-info mt-3">
+        <i class="bi bi-info-circle"></i>
+        Configure SMTP settings for email validation using SMTP ping verification.
+    </div>
+    
+    <div class="row mt-4">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5>SMTP Server Settings</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('admin.smtp_config') }}" id="smtpForm">
+                        <input type="hidden" name="action" value="save">
+                        
+                        <div class="mb-3">
+                            <label for="name" class="form-label">Configuration Name</label>
+                            <input type="text" class="form-control" id="name" name="name" 
+                                   value="{{ config.name if config else 'Default SMTP Config' }}" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="smtp_host" class="form-label">SMTP Host</label>
+                            <input type="text" class="form-control" id="smtp_host" name="smtp_host" 
+                                   value="{{ config.smtp_host if config else '' }}" placeholder="smtp.gmail.com" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="smtp_port" class="form-label">SMTP Port</label>
+                            <input type="number" class="form-control" id="smtp_port" name="smtp_port" 
+                                   value="{{ config.smtp_port if config else 25 }}" placeholder="25" required>
+                            <small class="form-text text-muted">Common ports: 25 (SMTP), 465 (SSL), 587 (TLS)</small>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="smtp_username" class="form-label">Username (Optional)</label>
+                            <input type="text" class="form-control" id="smtp_username" name="smtp_username" 
+                                   value="{{ config.smtp_username if config else '' }}" placeholder="your@email.com">
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="smtp_password" class="form-label">Password (Optional)</label>
+                            <input type="password" class="form-control" id="smtp_password" name="smtp_password" 
+                                   value="{{ config.smtp_password if config else '' }}" placeholder="••••••••">
+                        </div>
+                        
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="use_tls" name="use_tls" 
+                                   {% if config and config.use_tls %}checked{% endif %}>
+                            <label class="form-check-label" for="use_tls">
+                                Use TLS (STARTTLS)
+                            </label>
+                        </div>
+                        
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="use_ssl" name="use_ssl" 
+                                   {% if config and config.use_ssl %}checked{% endif %}>
+                            <label class="form-check-label" for="use_ssl">
+                                Use SSL
+                            </label>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="timeout" class="form-label">Timeout (seconds)</label>
+                            <input type="number" class="form-control" id="timeout" name="timeout" 
+                                   value="{{ config.timeout if config else 30 }}" min="10" max="120" required>
+                        </div>
+                        
+                        <div class="form-check mb-4">
+                            <input class="form-check-input" type="checkbox" id="is_active" name="is_active" 
+                                   {% if config and config.is_active %}checked{% elif not config %}checked{% endif %}>
+                            <label class="form-check-label" for="is_active">
+                                <strong>Enable SMTP Verification</strong>
+                            </label>
+                        </div>
+                        
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-secondary" id="testConnectionBtn">
+                                <i class="bi bi-check-circle"></i> Test Connection
+                            </button>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-save"></i> Save Configuration
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5><i class="bi bi-info-circle"></i> Help</h5>
+                </div>
+                <div class="card-body">
+                    <h6>What is SMTP Verification?</h6>
+                    <p class="small">SMTP ping verification connects to the mail server to verify if an email address exists without sending an email.</p>
+                    
+                    <h6>Configuration Tips:</h6>
+                    <ul class="small">
+                        <li>Use port 25 for standard SMTP</li>
+                        <li>Use port 587 with TLS for secure SMTP</li>
+                        <li>Use port 465 with SSL for encrypted SMTP</li>
+                        <li>Some mail servers may require authentication</li>
+                        <li>Test your configuration before saving</li>
+                    </ul>
+                    
+                    <h6>Guest Permissions:</h6>
+                    <p class="small">Guest users need explicit permission to use SMTP verification. Grant permission in User Management.</p>
+                </div>
+            </div>
+            
+            <div id="testResult" class="card mt-3" style="display:none;">
+                <div class="card-header" id="testResultHeader">
+                    Test Result
+                </div>
+                <div class="card-body">
+                    <p id="testResultMessage"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('testConnectionBtn').addEventListener('click', function() {
+    const btn = this;
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Testing...';
+    
+    // Hide previous result
+    document.getElementById('testResult').style.display = 'none';
+    
+    // Get form data
+    const formData = new FormData();
+    formData.append('action', 'test');
+    formData.append('smtp_host', document.getElementById('smtp_host').value);
+    formData.append('smtp_port', document.getElementById('smtp_port').value);
+    formData.append('smtp_username', document.getElementById('smtp_username').value);
+    formData.append('smtp_password', document.getElementById('smtp_password').value);
+    formData.append('use_tls', document.getElementById('use_tls').checked ? 'on' : 'off');
+    formData.append('use_ssl', document.getElementById('use_ssl').checked ? 'on' : 'off');
+    
+    fetch('{{ url_for("admin.smtp_config") }}', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+        
+        // Show result
+        const resultDiv = document.getElementById('testResult');
+        const resultHeader = document.getElementById('testResultHeader');
+        const resultMessage = document.getElementById('testResultMessage');
+        
+        resultDiv.style.display = 'block';
+        if (data.success) {
+            resultHeader.className = 'card-header bg-success text-white';
+            resultHeader.innerHTML = '<i class="bi bi-check-circle"></i> Success';
+            resultMessage.innerHTML = data.message;
+        } else {
+            resultHeader.className = 'card-header bg-danger text-white';
+            resultHeader.innerHTML = '<i class="bi bi-x-circle"></i> Failed';
+            resultMessage.innerHTML = data.message;
+        }
+    })
+    .catch(error => {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+        
+        const resultDiv = document.getElementById('testResult');
+        const resultHeader = document.getElementById('testResultHeader');
+        const resultMessage = document.getElementById('testResultMessage');
+        
+        resultDiv.style.display = 'block';
+        resultHeader.className = 'card-header bg-danger text-white';
+        resultHeader.innerHTML = '<i class="bi bi-x-circle"></i> Error';
+        resultMessage.innerHTML = 'An error occurred while testing the connection.';
+    });
+});
+</script>
+
+{% endblock %}

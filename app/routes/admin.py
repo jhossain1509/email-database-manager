@@ -3,7 +3,7 @@ from flask_login import login_required, current_user
 from app import db
 from app.models.user import User
 from app.models.email import IgnoreDomain, Email, Batch, RejectedEmail
-from app.models.job import ActivityLog, DownloadHistory
+from app.models.job import ActivityLog, DownloadHistory, SMTPConfig
 from app.utils.decorators import admin_required
 from app.utils.helpers import log_activity
 from sqlalchemy import desc, func
@@ -445,3 +445,70 @@ def delete_invalid_and_rejected():
         flash(f'Deleted {total} emails ({invalid_deleted} invalid, {rejected_deleted} rejected) from all batches.', 'success')
     
     return redirect(url_for('admin.cleanup'))
+
+
+@bp.route('/smtp-config', methods=['GET', 'POST'])
+@admin_required
+def smtp_config():
+    """SMTP Configuration for email validation"""
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'test':
+            # Test SMTP connection
+            import smtplib
+            import socket
+            
+            host = request.form.get('smtp_host')
+            port = int(request.form.get('smtp_port', 25))
+            username = request.form.get('smtp_username')
+            password = request.form.get('smtp_password')
+            use_tls = request.form.get('use_tls') == 'on'
+            use_ssl = request.form.get('use_ssl') == 'on'
+            
+            try:
+                if use_ssl:
+                    server = smtplib.SMTP_SSL(host, port, timeout=10)
+                else:
+                    server = smtplib.SMTP(host, port, timeout=10)
+                    if use_tls:
+                        server.starttls()
+                
+                if username and password:
+                    server.login(username, password)
+                
+                server.quit()
+                return jsonify({'success': True, 'message': 'SMTP connection successful!'})
+            except socket.timeout:
+                return jsonify({'success': False, 'message': 'Connection timeout. Please check host and port.'})
+            except smtplib.SMTPAuthenticationError:
+                return jsonify({'success': False, 'message': 'Authentication failed. Please check username and password.'})
+            except Exception as e:
+                return jsonify({'success': False, 'message': f'Connection failed: {str(e)}'})
+        
+        elif action == 'save':
+            # Save SMTP configuration
+            config = SMTPConfig.query.first()
+            if not config:
+                config = SMTPConfig()
+            
+            config.name = request.form.get('name', 'Default SMTP Config')
+            config.smtp_host = request.form.get('smtp_host')
+            config.smtp_port = int(request.form.get('smtp_port', 25))
+            config.smtp_username = request.form.get('smtp_username')
+            config.smtp_password = request.form.get('smtp_password')
+            config.use_tls = request.form.get('use_tls') == 'on'
+            config.use_ssl = request.form.get('use_ssl') == 'on'
+            config.timeout = int(request.form.get('timeout', 30))
+            config.is_active = request.form.get('is_active') == 'on'
+            
+            db.session.add(config)
+            db.session.commit()
+            
+            log_activity('admin_action', 'Updated SMTP configuration')
+            flash('SMTP configuration saved successfully.', 'success')
+            return redirect(url_for('admin.smtp_config'))
+    
+    # GET request - show form
+    config = SMTPConfig.query.first()
+    return render_template('admin/smtp_config.html', config=config)
