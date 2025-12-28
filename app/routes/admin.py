@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import login_required, current_user
 from app import db
 from app.models.user import User
-from app.models.email import IgnoreDomain, Email, Batch
+from app.models.email import IgnoreDomain, Email, Batch, RejectedEmail
 from app.models.job import ActivityLog, DownloadHistory
 from app.utils.decorators import admin_required
 from app.utils.helpers import log_activity
@@ -150,6 +150,40 @@ def delete_user(user_id):
     flash(f'User {username} deleted successfully.', 'success')
     return redirect(url_for('admin.users'))
 
+@bp.route('/user/<int:user_id>/reset-password', methods=['GET', 'POST'])
+@admin_required
+def reset_user_password(user_id):
+    """Reset user password"""
+    user = User.query.get_or_404(user_id)
+    
+    if request.method == 'POST':
+        new_password = request.form.get('new_password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        
+        # Validation
+        if not new_password or not confirm_password:
+            flash('Both password fields are required.', 'danger')
+            return redirect(url_for('admin.reset_user_password', user_id=user_id))
+        
+        if new_password != confirm_password:
+            flash('Passwords do not match.', 'danger')
+            return redirect(url_for('admin.reset_user_password', user_id=user_id))
+        
+        if len(new_password) < 6:
+            flash('Password must be at least 6 characters long.', 'danger')
+            return redirect(url_for('admin.reset_user_password', user_id=user_id))
+        
+        # Reset password
+        user.set_password(new_password)
+        db.session.commit()
+        
+        log_activity('admin_action', f'Reset password for user: {user.username}', 'user', user.id)
+        
+        flash(f'Password for user {user.username} reset successfully.', 'success')
+        return redirect(url_for('admin.users'))
+    
+    return render_template('admin/reset_password.html', user=user)
+
 @bp.route('/ignore-domains')
 @admin_required
 def ignore_domains():
@@ -279,3 +313,135 @@ def activity_logs():
     )
     
     return render_template('admin/activity_logs.html', pagination=pagination)
+
+@bp.route('/cleanup')
+@admin_required
+def cleanup():
+    """Email cleanup management page"""
+    from app.models.email import RejectedEmail
+    
+    # Get counts
+    invalid_count = Email.query.filter_by(is_validated=True, is_valid=False).count()
+    rejected_count = RejectedEmail.query.count()
+    
+    # Get batch breakdown
+    from sqlalchemy import func
+    invalid_by_batch = db.session.query(
+        Batch.id,
+        Batch.name,
+        func.count(Email.id).label('count')
+    ).join(Email, Email.batch_id == Batch.id).filter(
+        Email.is_validated == True,
+        Email.is_valid == False
+    ).group_by(Batch.id, Batch.name).all()
+    
+    rejected_by_batch = db.session.query(
+        Batch.id,
+        Batch.name,
+        func.count(RejectedEmail.id).label('count')
+    ).join(RejectedEmail, RejectedEmail.batch_id == Batch.id).group_by(
+        Batch.id, Batch.name
+    ).all()
+    
+    return render_template('admin/cleanup.html',
+                         invalid_count=invalid_count,
+                         rejected_count=rejected_count,
+                         invalid_by_batch=invalid_by_batch,
+                         rejected_by_batch=rejected_by_batch)
+
+@bp.route('/cleanup/delete-invalid', methods=['POST'])
+@admin_required
+def delete_invalid_emails():
+    """Delete invalid emails"""
+    batch_id = request.form.get('batch_id', type=int)
+    
+    if batch_id:
+        # Delete invalid emails from specific batch
+        deleted = Email.query.filter_by(
+            batch_id=batch_id,
+            is_validated=True,
+            is_valid=False
+        ).delete(synchronize_session='fetch')
+        
+        batch = Batch.query.get(batch_id)
+        batch_name = batch.name if batch else f"Batch {batch_id}"
+        
+        db.session.commit()
+        log_activity('admin_action', f'Deleted {deleted} invalid emails from {batch_name}')
+        flash(f'Deleted {deleted} invalid emails from {batch_name}.', 'success')
+    else:
+        # Delete all invalid emails
+        deleted = Email.query.filter_by(is_validated=True, is_valid=False).delete(synchronize_session='fetch')
+        db.session.commit()
+        
+        log_activity('admin_action', f'Deleted {deleted} invalid emails from all batches')
+        flash(f'Deleted {deleted} invalid emails from all batches.', 'success')
+    
+    return redirect(url_for('admin.cleanup'))
+
+@bp.route('/cleanup/delete-rejected', methods=['POST'])
+@admin_required
+def delete_rejected_emails():
+    """Delete rejected emails"""
+    from app.models.email import RejectedEmail
+    
+    batch_id = request.form.get('batch_id', type=int)
+    
+    if batch_id:
+        # Delete rejected emails from specific batch
+        deleted = RejectedEmail.query.filter_by(batch_id=batch_id).delete(synchronize_session='fetch')
+        
+        batch = Batch.query.get(batch_id)
+        batch_name = batch.name if batch else f"Batch {batch_id}"
+        
+        db.session.commit()
+        log_activity('admin_action', f'Deleted {deleted} rejected emails from {batch_name}')
+        flash(f'Deleted {deleted} rejected emails from {batch_name}.', 'success')
+    else:
+        # Delete all rejected emails
+        deleted = RejectedEmail.query.delete(synchronize_session='fetch')
+        db.session.commit()
+        
+        log_activity('admin_action', f'Deleted {deleted} rejected emails from all batches')
+        flash(f'Deleted {deleted} rejected emails from all batches.', 'success')
+    
+    return redirect(url_for('admin.cleanup'))
+
+@bp.route('/cleanup/delete-both', methods=['POST'])
+@admin_required
+def delete_invalid_and_rejected():
+    """Delete both invalid and rejected emails"""
+    from app.models.email import RejectedEmail
+    
+    batch_id = request.form.get('batch_id', type=int)
+    
+    if batch_id:
+        # Delete from specific batch
+        invalid_deleted = Email.query.filter_by(
+            batch_id=batch_id,
+            is_validated=True,
+            is_valid=False
+        ).delete(synchronize_session='fetch')
+        
+        rejected_deleted = RejectedEmail.query.filter_by(batch_id=batch_id).delete(synchronize_session='fetch')
+        
+        batch = Batch.query.get(batch_id)
+        batch_name = batch.name if batch else f"Batch {batch_id}"
+        
+        db.session.commit()
+        
+        total = invalid_deleted + rejected_deleted
+        log_activity('admin_action', f'Deleted {total} emails ({invalid_deleted} invalid, {rejected_deleted} rejected) from {batch_name}')
+        flash(f'Deleted {total} emails ({invalid_deleted} invalid, {rejected_deleted} rejected) from {batch_name}.', 'success')
+    else:
+        # Delete all
+        invalid_deleted = Email.query.filter_by(is_validated=True, is_valid=False).delete(synchronize_session='fetch')
+        rejected_deleted = RejectedEmail.query.delete(synchronize_session='fetch')
+        
+        db.session.commit()
+        
+        total = invalid_deleted + rejected_deleted
+        log_activity('admin_action', f'Deleted {total} emails ({invalid_deleted} invalid, {rejected_deleted} rejected) from all batches')
+        flash(f'Deleted {total} emails ({invalid_deleted} invalid, {rejected_deleted} rejected) from all batches.', 'success')
+    
+    return redirect(url_for('admin.cleanup'))

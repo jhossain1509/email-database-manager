@@ -6,31 +6,154 @@
     <div class="row mt-4">
         <div class="col-md-8">
             <div class="card">
-                <div class="card-header"><h5>Select Batch to Validate</h5></div>
+                <div class="card-header"><h5>Validation Configuration</h5></div>
                 <div class="card-body">
                     <form method="POST">
+                        <!-- Validate All Unverified Option -->
                         <div class="mb-3">
-                            <label for="batch_id" class="form-label">Batch</label>
-                            <select class="form-select" id="batch_id" name="batch_id" required>
+                            <div class="alert alert-info">
+                                <strong>Total Unverified Emails:</strong> {{ total_unverified }}
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="validate_all_unverified" 
+                                       name="validate_all_unverified" onchange="toggleBatchSelection()">
+                                <label class="form-check-label" for="validate_all_unverified">
+                                    <strong>Validate All Unverified Emails</strong>
+                                </label>
+                                <small class="form-text text-muted d-block">
+                                    Check this to validate all unverified emails across all batches
+                                </small>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <hr>
+                            <p class="text-muted">OR</p>
+                        </div>
+                        
+                        <!-- Batch Selection -->
+                        <div class="mb-3" id="batch_selection">
+                            <label for="batch_id" class="form-label">Select Specific Batch</label>
+                            <select class="form-select" id="batch_id" name="batch_id">
                                 <option value="">-- Select a batch --</option>
                                 {% for batch in batches %}
-                                <option value="{{ batch.id }}">{{ batch.name }} ({{ batch.total_count }} emails)</option>
+                                <option value="{{ batch.id }}">
+                                    {{ batch.name }} ({{ batch.unverified_count }} unverified emails)
+                                </option>
                                 {% endfor %}
                             </select>
+                            <small class="form-text text-muted">
+                                Only batches with unverified emails are shown
+                            </small>
                         </div>
-                        <div class="mb-3 form-check">
-                            <input type="checkbox" class="form-check-input" id="check_dns" name="check_dns">
-                            <label class="form-check-label" for="check_dns">Check DNS/MX records (slower)</label>
+                        
+                        <!-- Domain Filter -->
+                        {% if domain_stats %}
+                        <div class="mb-3">
+                            <label class="form-label">Filter by Domains (Optional)</label>
+                            <div class="card">
+                                <div class="card-body">
+                                    <p class="text-muted small">Select specific domains to validate:</p>
+                                    {% for stat in domain_stats %}
+                                    <div class="form-check">
+                                        <input class="form-check-input domain-filter-checkbox" type="checkbox" 
+                                               id="domain_filter_{{ loop.index }}"
+                                               data-domain="{{ stat.domain }}">
+                                        <label class="form-check-label" for="domain_filter_{{ loop.index }}">
+                                            <strong>{{ stat.domain }}</strong>
+                                            <span class="badge bg-info">{{ stat.count }} unverified</span>
+                                            {% if stat.category == 'mixed' %}
+                                            <span class="badge bg-secondary">Mixed Domains</span>
+                                            {% else %}
+                                            <span class="badge bg-primary">Top Domain</span>
+                                            {% endif %}
+                                        </label>
+                                    </div>
+                                    {% endfor %}
+                                    <input type="hidden" name="filter_domains" id="filter_domains">
+                                </div>
+                            </div>
                         </div>
-                        <div class="mb-3 form-check">
-                            <input type="checkbox" class="form-check-input" id="check_role" name="check_role">
-                            <label class="form-check-label" for="check_role">Filter role-based emails (info@, admin@, etc.)</label>
+                        {% endif %}
+                        
+                        <!-- Validation Options -->
+                        <div class="mb-3">
+                            <label class="form-label">Validation Options</label>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="check_dns" name="check_dns">
+                                <label class="form-check-label" for="check_dns">
+                                    Check DNS/MX records (slower but more accurate)
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="check_role" name="check_role">
+                                <label class="form-check-label" for="check_role">
+                                    Filter role-based emails (info@, admin@, etc.)
+                                </label>
+                            </div>
                         </div>
-                        <button type="submit" class="btn btn-primary"><i class="bi bi-check-circle"></i> Start Validation</button>
+                        
+                        <button type="submit" class="btn btn-primary" onclick="return prepareValidation()">
+                            <i class="bi bi-check-circle"></i> Start Validation
+                        </button>
+                        <a href="{{ url_for('dashboard.index') }}" class="btn btn-secondary">Cancel</a>
                     </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header"><h5>Validation Info</h5></div>
+                <div class="card-body">
+                    <p><strong>Note:</strong> Validation checks:</p>
+                    <ul>
+                        <li>Email format and syntax</li>
+                        <li>Domain validity</li>
+                        <li>Optionally: DNS/MX records</li>
+                        <li>Optionally: Role-based filtering</li>
+                    </ul>
+                    <p class="text-muted small">
+                        <strong>Skip Already Validated:</strong> This form only shows batches and emails 
+                        that haven't been validated yet. Already validated emails won't be processed again.
+                    </p>
                 </div>
             </div>
         </div>
     </div>
 </div>
+
+<script>
+function toggleBatchSelection() {
+    const validateAll = document.getElementById('validate_all_unverified').checked;
+    const batchSelect = document.getElementById('batch_id');
+    
+    if (validateAll) {
+        batchSelect.value = '';
+        batchSelect.disabled = true;
+    } else {
+        batchSelect.disabled = false;
+    }
+}
+
+function prepareValidation() {
+    const validateAll = document.getElementById('validate_all_unverified').checked;
+    const batchId = document.getElementById('batch_id').value;
+    
+    // Check if at least one option is selected
+    if (!validateAll && !batchId) {
+        alert('Please select either "Validate All Unverified" or choose a specific batch');
+        return false;
+    }
+    
+    // Prepare domain filters
+    const selectedDomains = [];
+    document.querySelectorAll('.domain-filter-checkbox:checked').forEach(cb => {
+        selectedDomains.push(cb.dataset.domain);
+    });
+    
+    document.getElementById('filter_domains').value = selectedDomains.join(',');
+    return true;
+}
+</script>
 {% endblock %}

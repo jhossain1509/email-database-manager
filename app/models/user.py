@@ -18,6 +18,9 @@ class User(UserMixin, db.Model):
     last_activity = db.Column(db.DateTime)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     
+    # SMTP Verification Permission
+    smtp_verification_allowed = db.Column(db.Boolean, default=False, nullable=False)
+    
     # Relationships
     batches = db.relationship('Batch', backref='owner', lazy='dynamic', cascade='all, delete-orphan')
     jobs = db.relationship('Job', backref='user', lazy='dynamic', cascade='all, delete-orphan')
