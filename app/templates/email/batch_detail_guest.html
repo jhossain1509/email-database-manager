@@ -1,0 +1,153 @@
+{% extends "layouts/base.html" %}
+{% block title %}Batch Detail{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+    <h2><i class="bi bi-folder"></i> {{ batch.name }}</h2>
+    <div class="alert alert-info">
+        <strong>Guest View:</strong> This shows all emails you uploaded, including duplicates that already exist in the database.
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header"><h5>Batch Statistics</h5></div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-2"><strong>Total Uploaded:</strong> {{ guest_items|length }}</div>
+                        <div class="col-md-2"><strong>New Inserts:</strong> <span class="text-success">{{ batch.total_count }}</span></div>
+                        <div class="col-md-2"><strong>Duplicates:</strong> <span class="text-info">{{ batch.duplicate_count }}</span></div>
+                        <div class="col-md-2"><strong>Rejected:</strong> <span class="text-warning">{{ batch.rejected_count }}</span></div>
+                        <div class="col-md-2"><strong>Status:</strong> <span class="badge bg-info">{{ batch.status }}</span></div>
+                    </div>
+                    <div class="mt-3">
+                        <a href="{{ url_for('email.export') }}?batch_id={{ batch.id }}" class="btn btn-primary">
+                            <i class="bi bi-download"></i> Export My Uploaded List
+                        </a>
+                        <a href="{{ url_for('email.validate') }}" class="btn btn-success">
+                            <i class="bi bi-check-circle"></i> Validate Emails
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header"><h5>Your Uploaded Emails (First 100)</h5></div>
+                <div class="card-body">
+                    {% if guest_items %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Email</th>
+                                    <th>Domain</th>
+                                    <th>Result</th>
+                                    <th>Status</th>
+                                    <th>Quality</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in guest_items[:100] %}
+                                <tr>
+                                    <td>{{ item.email_normalized }}</td>
+                                    <td>{{ item.domain }}</td>
+                                    <td>
+                                        {% if item.result == 'inserted' %}
+                                        <span class="badge bg-success">New</span>
+                                        {% elif item.result == 'duplicate' %}
+                                        <span class="badge bg-info">Duplicate</span>
+                                        {% elif item.result == 'rejected' %}
+                                        <span class="badge bg-warning">Rejected</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if item.matched_email %}
+                                            {% if item.matched_email.is_validated %}
+                                                {% if item.matched_email.is_valid %}
+                                                <span class="badge bg-success">Valid</span>
+                                                {% else %}
+                                                <span class="badge bg-danger">Invalid</span>
+                                                {% endif %}
+                                            {% else %}
+                                            <span class="badge bg-secondary">Unverified</span>
+                                            {% endif %}
+                                        {% elif item.result == 'rejected' %}
+                                        <span class="badge bg-warning" title="{{ item.rejected_reason }}">{{ item.rejected_reason }}</span>
+                                        {% else %}
+                                        <span class="badge bg-secondary">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if item.matched_email and item.matched_email.quality_score %}
+                                        {{ item.matched_email.quality_score }}
+                                        {% else %}
+                                        -
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No emails in this batch.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header"><h5>Processing Jobs</h5></div>
+                <div class="card-body">
+                    {% if jobs %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Progress</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for job in jobs %}
+                                <tr>
+                                    <td>{{ job.job_type }}</td>
+                                    <td>
+                                        {% if job.status == 'completed' %}
+                                        <span class="badge bg-success">{{ job.status }}</span>
+                                        {% elif job.status == 'failed' %}
+                                        <span class="badge bg-danger">{{ job.status }}</span>
+                                        {% elif job.status == 'running' %}
+                                        <span class="badge bg-primary">{{ job.status }}</span>
+                                        {% else %}
+                                        <span class="badge bg-secondary">{{ job.status }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ job.progress_percent|round(1) }}%</td>
+                                    <td>{{ job.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                    <td>
+                                        <a href="{{ url_for('email.job_status', job_id=job.job_id) }}" class="btn btn-sm btn-outline-primary">
+                                            <i class="bi bi-eye"></i> View
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No jobs found.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

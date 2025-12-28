@@ -2,8 +2,8 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import login_required, current_user
 from app import db
 from app.models.user import User
-from app.models.email import IgnoreDomain, Email, Batch
-from app.models.job import ActivityLog, DownloadHistory
+from app.models.email import IgnoreDomain, Email, Batch, RejectedEmail
+from app.models.job import ActivityLog, DownloadHistory, SMTPConfig
 from app.utils.decorators import admin_required
 from app.utils.helpers import log_activity
 from sqlalchemy import desc, func
@@ -110,6 +110,7 @@ def edit_user(user_id):
     if request.method == 'POST':
         role = request.form.get('role')
         is_active = request.form.get('is_active') == 'on'
+        smtp_verification_allowed = request.form.get('smtp_verification_allowed') == 'on'
         
         # Super admin restriction
         if role == 'super_admin' and current_user.role != 'super_admin':
@@ -122,9 +123,10 @@ def edit_user(user_id):
         
         user.role = role
         user.is_active = is_active
+        user.smtp_verification_allowed = smtp_verification_allowed
         db.session.commit()
         
-        log_activity('admin_action', f'Updated user: {user.username}', 'user', user.id)
+        log_activity('admin_action', f'Updated user: {user.username} (SMTP permission: {smtp_verification_allowed})', 'user', user.id)
         
         flash(f'User {user.username} updated successfully.', 'success')
         return redirect(url_for('admin.users'))
@@ -149,6 +151,40 @@ def delete_user(user_id):
     
     flash(f'User {username} deleted successfully.', 'success')
     return redirect(url_for('admin.users'))
+
+@bp.route('/user/<int:user_id>/reset-password', methods=['GET', 'POST'])
+@admin_required
+def reset_user_password(user_id):
+    """Reset user password"""
+    user = User.query.get_or_404(user_id)
+    
+    if request.method == 'POST':
+        new_password = request.form.get('new_password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        
+        # Validation
+        if not new_password or not confirm_password:
+            flash('Both password fields are required.', 'danger')
+            return redirect(url_for('admin.reset_user_password', user_id=user_id))
+        
+        if new_password != confirm_password:
+            flash('Passwords do not match.', 'danger')
+            return redirect(url_for('admin.reset_user_password', user_id=user_id))
+        
+        if len(new_password) < 6:
+            flash('Password must be at least 6 characters long.', 'danger')
+            return redirect(url_for('admin.reset_user_password', user_id=user_id))
+        
+        # Reset password
+        user.set_password(new_password)
+        db.session.commit()
+        
+        log_activity('admin_action', f'Reset password for user: {user.username}', 'user', user.id)
+        
+        flash(f'Password for user {user.username} reset successfully.', 'success')
+        return redirect(url_for('admin.users'))
+    
+    return render_template('admin/reset_password.html', user=user)
 
 @bp.route('/ignore-domains')
 @admin_required
@@ -279,3 +315,283 @@ def activity_logs():
     )
     
     return render_template('admin/activity_logs.html', pagination=pagination)
+
+@bp.route('/cleanup')
+@admin_required
+def cleanup():
+    """Email cleanup management page"""
+    from app.models.email import RejectedEmail
+    
+    # Get counts
+    invalid_count = Email.query.filter_by(is_validated=True, is_valid=False).count()
+    rejected_count = RejectedEmail.query.count()
+    
+    # Get batch breakdown
+    from sqlalchemy import func
+    invalid_by_batch = db.session.query(
+        Batch.id,
+        Batch.name,
+        func.count(Email.id).label('count')
+    ).join(Email, Email.batch_id == Batch.id).filter(
+        Email.is_validated == True,
+        Email.is_valid == False
+    ).group_by(Batch.id, Batch.name).all()
+    
+    rejected_by_batch = db.session.query(
+        Batch.id,
+        Batch.name,
+        func.count(RejectedEmail.id).label('count')
+    ).join(RejectedEmail, RejectedEmail.batch_id == Batch.id).group_by(
+        Batch.id, Batch.name
+    ).all()
+    
+    return render_template('admin/cleanup.html',
+                         invalid_count=invalid_count,
+                         rejected_count=rejected_count,
+                         invalid_by_batch=invalid_by_batch,
+                         rejected_by_batch=rejected_by_batch)
+
+@bp.route('/cleanup/delete-invalid', methods=['POST'])
+@admin_required
+def delete_invalid_emails():
+    """Delete invalid emails"""
+    batch_id = request.form.get('batch_id', type=int)
+    
+    if batch_id:
+        # Delete invalid emails from specific batch
+        deleted = Email.query.filter_by(
+            batch_id=batch_id,
+            is_validated=True,
+            is_valid=False
+        ).delete(synchronize_session='fetch')
+        
+        batch = Batch.query.get(batch_id)
+        batch_name = batch.name if batch else f"Batch {batch_id}"
+        
+        db.session.commit()
+        log_activity('admin_action', f'Deleted {deleted} invalid emails from {batch_name}')
+        flash(f'Deleted {deleted} invalid emails from {batch_name}.', 'success')
+    else:
+        # Delete all invalid emails
+        deleted = Email.query.filter_by(is_validated=True, is_valid=False).delete(synchronize_session='fetch')
+        db.session.commit()
+        
+        log_activity('admin_action', f'Deleted {deleted} invalid emails from all batches')
+        flash(f'Deleted {deleted} invalid emails from all batches.', 'success')
+    
+    return redirect(url_for('admin.cleanup'))
+
+@bp.route('/cleanup/delete-rejected', methods=['POST'])
+@admin_required
+def delete_rejected_emails():
+    """Delete rejected emails"""
+    from app.models.email import RejectedEmail
+    
+    batch_id = request.form.get('batch_id', type=int)
+    
+    if batch_id:
+        # Delete rejected emails from specific batch
+        deleted = RejectedEmail.query.filter_by(batch_id=batch_id).delete(synchronize_session='fetch')
+        
+        batch = Batch.query.get(batch_id)
+        batch_name = batch.name if batch else f"Batch {batch_id}"
+        
+        db.session.commit()
+        log_activity('admin_action', f'Deleted {deleted} rejected emails from {batch_name}')
+        flash(f'Deleted {deleted} rejected emails from {batch_name}.', 'success')
+    else:
+        # Delete all rejected emails
+        deleted = RejectedEmail.query.delete(synchronize_session='fetch')
+        db.session.commit()
+        
+        log_activity('admin_action', f'Deleted {deleted} rejected emails from all batches')
+        flash(f'Deleted {deleted} rejected emails from all batches.', 'success')
+    
+    return redirect(url_for('admin.cleanup'))
+
+@bp.route('/cleanup/delete-both', methods=['POST'])
+@admin_required
+def delete_invalid_and_rejected():
+    """Delete both invalid and rejected emails"""
+    from app.models.email import RejectedEmail
+    
+    batch_id = request.form.get('batch_id', type=int)
+    
+    if batch_id:
+        # Delete from specific batch
+        invalid_deleted = Email.query.filter_by(
+            batch_id=batch_id,
+            is_validated=True,
+            is_valid=False
+        ).delete(synchronize_session='fetch')
+        
+        rejected_deleted = RejectedEmail.query.filter_by(batch_id=batch_id).delete(synchronize_session='fetch')
+        
+        batch = Batch.query.get(batch_id)
+        batch_name = batch.name if batch else f"Batch {batch_id}"
+        
+        db.session.commit()
+        
+        total = invalid_deleted + rejected_deleted
+        log_activity('admin_action', f'Deleted {total} emails ({invalid_deleted} invalid, {rejected_deleted} rejected) from {batch_name}')
+        flash(f'Deleted {total} emails ({invalid_deleted} invalid, {rejected_deleted} rejected) from {batch_name}.', 'success')
+    else:
+        # Delete all
+        invalid_deleted = Email.query.filter_by(is_validated=True, is_valid=False).delete(synchronize_session='fetch')
+        rejected_deleted = RejectedEmail.query.delete(synchronize_session='fetch')
+        
+        db.session.commit()
+        
+        total = invalid_deleted + rejected_deleted
+        log_activity('admin_action', f'Deleted {total} emails ({invalid_deleted} invalid, {rejected_deleted} rejected) from all batches')
+        flash(f'Deleted {total} emails ({invalid_deleted} invalid, {rejected_deleted} rejected) from all batches.', 'success')
+    
+    return redirect(url_for('admin.cleanup'))
+
+
+@bp.route('/smtp-config', methods=['GET', 'POST'])
+@admin_required
+def smtp_config():
+    """SMTP Configuration for email validation"""
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'test':
+            # Test SMTP connection
+            import smtplib
+            import socket
+            
+            host = request.form.get('smtp_host')
+            port = int(request.form.get('smtp_port', 25))
+            username = request.form.get('smtp_username')
+            password = request.form.get('smtp_password')
+            use_tls = request.form.get('use_tls') == 'on'
+            use_ssl = request.form.get('use_ssl') == 'on'
+            
+            try:
+                if use_ssl:
+                    server = smtplib.SMTP_SSL(host, port, timeout=10)
+                else:
+                    server = smtplib.SMTP(host, port, timeout=10)
+                    if use_tls:
+                        server.starttls()
+                
+                if username and password:
+                    server.login(username, password)
+                
+                server.quit()
+                return jsonify({'success': True, 'message': 'SMTP connection successful!'})
+            except socket.timeout:
+                return jsonify({'success': False, 'message': 'Connection timeout. Please check host and port.'})
+            except smtplib.SMTPAuthenticationError:
+                return jsonify({'success': False, 'message': 'Authentication failed. Please check username and password.'})
+            except Exception as e:
+                return jsonify({'success': False, 'message': f'Connection failed: {str(e)}'})
+        
+        elif action == 'bulk_upload':
+            # Bulk upload SMTP servers
+            bulk_list = request.form.get('bulk_smtp_list', '').strip()
+            thread_count = int(request.form.get('thread_count', 5))
+            enable_rotation = request.form.get('enable_rotation') == 'on'
+            
+            if not bulk_list:
+                flash('Please provide SMTP server list.', 'danger')
+                return redirect(url_for('admin.smtp_config'))
+            
+            lines = bulk_list.split('\n')
+            added_count = 0
+            error_count = 0
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                parts = line.split('|')
+                if len(parts) != 4:
+                    error_count += 1
+                    continue
+                
+                host, port, username, password = parts
+                
+                try:
+                    # Check if already exists
+                    existing = SMTPConfig.query.filter_by(
+                        smtp_host=host.strip(),
+                        smtp_port=int(port.strip()),
+                        smtp_username=username.strip()
+                    ).first()
+                    
+                    if existing:
+                        continue
+                    
+                    config = SMTPConfig(
+                        name=f'{host.strip()}:{port.strip()}',
+                        smtp_host=host.strip(),
+                        smtp_port=int(port.strip()),
+                        smtp_username=username.strip(),
+                        smtp_password=password.strip(),
+                        from_email=username.strip(),  # Use SMTP username as from_email
+                        use_tls=int(port.strip()) == 587,
+                        use_ssl=int(port.strip()) == 465,
+                        timeout=30,
+                        is_active=True,
+                        thread_count=thread_count,
+                        enable_rotation=enable_rotation
+                    )
+                    db.session.add(config)
+                    added_count += 1
+                except Exception as e:
+                    error_count += 1
+                    continue
+            
+            db.session.commit()
+            
+            log_activity('admin_action', f'Bulk uploaded {added_count} SMTP servers')
+            
+            if added_count > 0:
+                flash(f'Successfully added {added_count} SMTP servers. {error_count} errors.', 'success')
+            else:
+                flash(f'No servers added. {error_count} errors.', 'warning')
+            
+            return redirect(url_for('admin.smtp_config'))
+        
+        elif action == 'delete':
+            # Delete SMTP server
+            server_id = request.form.get('server_id')
+            config = SMTPConfig.query.get(server_id)
+            if config:
+                db.session.delete(config)
+                db.session.commit()
+                log_activity('admin_action', f'Deleted SMTP server: {config.name}')
+                flash('SMTP server deleted successfully.', 'success')
+            return redirect(url_for('admin.smtp_config'))
+        
+        elif action == 'save':
+            # Save SMTP configuration
+            config = SMTPConfig.query.first()
+            if not config:
+                config = SMTPConfig()
+            
+            config.name = request.form.get('name', 'Default SMTP Config')
+            config.smtp_host = request.form.get('smtp_host')
+            config.smtp_port = int(request.form.get('smtp_port', 25))
+            config.smtp_username = request.form.get('smtp_username')
+            config.smtp_password = request.form.get('smtp_password')
+            config.from_email = request.form.get('from_email') or request.form.get('smtp_username')  # Use username as fallback
+            config.use_tls = request.form.get('use_tls') == 'on'
+            config.use_ssl = request.form.get('use_ssl') == 'on'
+            config.timeout = int(request.form.get('timeout', 30))
+            config.is_active = request.form.get('is_active') == 'on'
+            
+            db.session.add(config)
+            db.session.commit()
+            
+            log_activity('admin_action', 'Updated SMTP configuration')
+            flash('SMTP configuration saved successfully.', 'success')
+            return redirect(url_for('admin.smtp_config'))
+    
+    # GET request - show form
+    config = SMTPConfig.query.first()
+    smtp_servers = SMTPConfig.query.order_by(SMTPConfig.is_active.desc(), SMTPConfig.last_used_at.desc()).all()
+    return render_template('admin/smtp_config.html', config=config, smtp_servers=smtp_servers)

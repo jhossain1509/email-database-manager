@@ -377,3 +377,82 @@ def validate_email_enhanced(email, check_dns=False, check_smtp=False, check_role
                                                   domain_category=details['domain_category'])
     
     return True, None, None, quality_score, details
+
+
+def verify_email_smtp(email, smtp_host, smtp_port, smtp_username, smtp_password, 
+                      use_tls=True, use_ssl=False, timeout=30, from_email=None):
+    """
+    Verify email using SMTP server by attempting RCPT TO command.
+    
+    Args:
+        email: Email address to verify
+        smtp_host: SMTP server hostname
+        smtp_port: SMTP server port
+        smtp_username: SMTP account username
+        smtp_password: SMTP account password
+        use_tls: Whether to use STARTTLS
+        use_ssl: Whether to use SSL
+        timeout: Connection timeout in seconds
+        from_email: Email to use in MAIL FROM (defaults to smtp_username)
+    
+    Returns:
+        tuple: (is_valid, error_code, error_message)
+    """
+    import smtplib
+    import socket
+    
+    if not from_email:
+        from_email = smtp_username
+    
+    try:
+        # Connect to SMTP server
+        if use_ssl:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=timeout)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=timeout)
+        
+        server.set_debuglevel(0)
+        
+        # Use STARTTLS if specified and not using SSL
+        if use_tls and not use_ssl:
+            server.starttls()
+        
+        # Login
+        server.login(smtp_username, smtp_password)
+        
+        # Send MAIL FROM command
+        code, message = server.mail(from_email)
+        if code != 250:
+            server.quit()
+            return False, 'smtp_mail_from_failed', f'MAIL FROM failed: {message.decode()}'
+        
+        # Send RCPT TO command to verify email
+        code, message = server.rcpt(email)
+        server.quit()
+        
+        # Check response code
+        # 250: Recipient OK
+        # 550: User not found / Mailbox unavailable
+        # 551: User not local
+        # 552: Mailbox full
+        # 553: Mailbox name not allowed
+        # 450-451: Temporary failure (greylisting)
+        
+        if code == 250:
+            return True, None, None
+        elif code in [550, 551, 553]:
+            return False, f'smtp_invalid_{code}', f'Email rejected by server: {message.decode()}'
+        elif code in [450, 451, 452]:
+            # Temporary failure - treat as valid (greylisting)
+            return True, None, None
+        else:
+            return False, f'smtp_code_{code}', f'SMTP verification failed: {message.decode()}'
+    
+    except smtplib.SMTPAuthenticationError as e:
+        return False, 'smtp_auth_error', f'SMTP authentication failed: {str(e)}'
+    except smtplib.SMTPException as e:
+        return False, 'smtp_error', f'SMTP error: {str(e)}'
+    except socket.timeout:
+        return False, 'smtp_timeout', 'SMTP connection timed out'
+    except Exception as e:
+        return False, 'smtp_connection_error', f'Connection error: {str(e)}'

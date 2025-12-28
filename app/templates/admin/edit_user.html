@@ -33,6 +33,13 @@
                             <input type="checkbox" class="form-check-input" id="is_active" name="is_active" {% if user.is_active %}checked{% endif %}>
                             <label class="form-check-label" for="is_active">Account Active</label>
                         </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="smtp_verification_allowed" name="smtp_verification_allowed" {% if user.smtp_verification_allowed %}checked{% endif %}>
+                            <label class="form-check-label" for="smtp_verification_allowed">
+                                <i class="bi bi-shield-check"></i> Allow SMTP Verification
+                                <small class="text-muted d-block">Enables SMTP Ping Verified option for this user in validation</small>
+                            </label>
+                        </div>
                         <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Update User</button>
                         <a href="{{ url_for('admin.users') }}" class="btn btn-secondary">Cancel</a>
                     </form>
