@@ -171,6 +171,10 @@ def validate():
         check_dns = request.form.get('check_dns') == 'on'
         check_role = request.form.get('check_role') == 'on'
         
+        # Get validation method and determine if SMTP should be used
+        validation_method = request.form.get('validation_method', 'standard')
+        use_smtp = (validation_method == 'smtp')
+        
         # Check if validating all unverified or a specific batch
         if not batch_id and not validate_all_unverified:
             flash('Please select a batch or choose to validate all unverified emails.', 'danger')
@@ -193,8 +197,10 @@ def validate():
             current_user.id,
             check_dns,
             check_role,
+            True,  # check_disposable
             validate_all_unverified,
-            filter_domains
+            filter_domains,
+            use_smtp
         )
         
         # Create job record
