@@ -441,8 +441,6 @@ def export():
     # Get batches for selection
     if current_user.is_guest():
         user_batches = Batch.query.filter_by(user_id=current_user.id).all()
-        # Guest users should not see domain stats from main DB
-        domain_stats = []
     elif current_user.is_admin():
         user_batches = Batch.query.all()
         base_query = Email.query
@@ -450,9 +448,82 @@ def export():
         user_batches = Batch.query.filter_by(user_id=current_user.id).all()
         base_query = Email.query.filter_by(uploaded_by=current_user.id)
     
-    # Get domain statistics (not for guests)
+    # Get domain statistics
     domain_stats = []
-    if not current_user.is_guest():
+    if current_user.is_guest():
+        # Guest users see domain stats from their GuestEmailItem records
+        from flask import current_app
+        from sqlalchemy import func
+        from app.models.email import GuestEmailItem
+        
+        TOP_DOMAINS = current_app.config.get('TOP_DOMAINS', [
+            'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
+            'aol.com', 'icloud.com', 'protonmail.com', 'mail.com',
+            'zoho.com', 'gmx.com'
+        ])
+        
+        # Build domain stats from GuestEmailItem records
+        guest_base_query = GuestEmailItem.query.filter_by(user_id=current_user.id)
+        
+        for domain in TOP_DOMAINS:
+            domain_query = guest_base_query.filter_by(domain=domain)
+            total = domain_query.count()
+            if total > 0:
+                # Count by validation status via matched_email relationship
+                verified = domain_query.join(GuestEmailItem.matched_email, isouter=False).filter(
+                    Email.is_validated == True, Email.is_valid == True
+                ).count()
+                unverified = domain_query.join(GuestEmailItem.matched_email, isouter=False).filter(
+                    Email.is_validated == False
+                ).count()
+                invalid = domain_query.join(GuestEmailItem.matched_email, isouter=False).filter(
+                    Email.is_validated == True, Email.is_valid == False
+                ).count()
+                
+                # For guest users, "available" means not yet exported (all are available)
+                # Since guests don't have downloaded tracking, use total counts as available
+                domain_stats.append({
+                    'domain': domain,
+                    'total': total,
+                    'verified': verified,
+                    'verified_available': verified,
+                    'unverified': unverified,
+                    'unverified_available': unverified,
+                    'invalid': invalid,
+                    'invalid_available': invalid,
+                    'all_available': total,
+                    'category': 'top'
+                })
+        
+        # Get mixed domain count (domains not in TOP_DOMAINS)
+        mixed_query = guest_base_query.filter(
+            ~GuestEmailItem.domain.in_(TOP_DOMAINS)
+        )
+        mixed_total = mixed_query.count()
+        if mixed_total > 0:
+            mixed_verified = mixed_query.join(GuestEmailItem.matched_email, isouter=False).filter(
+                Email.is_validated == True, Email.is_valid == True
+            ).count()
+            mixed_unverified = mixed_query.join(GuestEmailItem.matched_email, isouter=False).filter(
+                Email.is_validated == False
+            ).count()
+            mixed_invalid = mixed_query.join(GuestEmailItem.matched_email, isouter=False).filter(
+                Email.is_validated == True, Email.is_valid == False
+            ).count()
+            
+            domain_stats.append({
+                'domain': 'mixed',
+                'total': mixed_total,
+                'verified': mixed_verified,
+                'verified_available': mixed_verified,
+                'unverified': mixed_unverified,
+                'unverified_available': mixed_unverified,
+                'invalid': mixed_invalid,
+                'invalid_available': mixed_invalid,
+                'all_available': mixed_total,
+                'category': 'mixed'
+            })
+    elif not current_user.is_guest():
         from flask import current_app
         from sqlalchemy import func
         
