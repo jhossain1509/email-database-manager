@@ -367,12 +367,14 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                 
                 if not smtp_configs:
                     # Fallback to DNS validation if no SMTP servers
+                    print(f"[SMTP] WARNING: No active SMTP servers configured. Falling back to DNS validation.")
                     use_smtp = False
                     check_dns = True
                 else:
                     smtp_servers = smtp_configs
                     # Get thread count from first config (they should all have same setting)
                     thread_count = smtp_configs[0].thread_count if smtp_configs else 5
+                    print(f"[SMTP] Found {len(smtp_servers)} active SMTP server(s), thread_count={thread_count}")
             
             # Get ignore domains
             ignore_domains = [d.domain for d in IgnoreDomain.query.all()]
@@ -460,10 +462,17 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
             from app.utils.email_validator import validate_email_enhanced
             
             if use_smtp and smtp_servers:
+                # Log SMTP validation start
+                print(f"[SMTP] Using SMTP verification with {len(smtp_servers)} server(s), {thread_count} thread(s)")
+                print(f"[SMTP] Server list: {[f'{s.smtp_host}:{s.smtp_port}' for s in smtp_servers]}")
+                
                 # SMTP validation with threading and rotation
                 def validate_with_smtp(email_obj, smtp_server_idx):
                     """Validate single email using SMTP"""
                     smtp_server = smtp_servers[smtp_server_idx % len(smtp_servers)]
+                    server_name = f"{smtp_server.smtp_host}:{smtp_server.smtp_port}"
+                    
+                    print(f"[SMTP] Validating {email_obj.email} using {server_name}")
                     
                     is_valid, error_code, error_message = verify_email_smtp(
                         email_obj.email,
@@ -477,12 +486,17 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                         from_email=smtp_server.from_email
                     )
                     
+                    # Log result
+                    result_str = "VALID" if is_valid else f"INVALID ({error_message})"
+                    print(f"[SMTP] Email validated: {email_obj.email} - Result: {result_str}")
+                    
                     # Update last used timestamp for rotation
                     smtp_server.last_used_at = dt.utcnow()
                     
                     return email_obj, is_valid, error_code, error_message
                 
                 # Use ThreadPoolExecutor for concurrent SMTP validation
+                print(f"[SMTP] Starting concurrent validation with thread pool (max_workers={thread_count})")
                 with ThreadPoolExecutor(max_workers=thread_count) as executor:
                     futures = []
                     for idx, email_obj in enumerate(emails):
@@ -499,6 +513,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                             email_obj.is_validated = True
                             email_obj.is_valid = is_valid
                             email_obj.quality_score = 100 if is_valid else 0
+                            email_obj.validation_method = 'smtp'  # Mark as SMTP validated
                             
                             if not is_valid:
                                 email_obj.validation_error = f'SMTP: {error_message}' if error_message else 'Invalid'
@@ -510,6 +525,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                             
                             # Update progress every 50 emails
                             if completed % 50 == 0:
+                                print(f"[SMTP] Progress: {completed}/{job.total} emails validated ({valid_count} valid, {invalid_count} invalid)")
                                 job.update_progress(completed)
                                 db.session.commit()
                                 
@@ -523,10 +539,11 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                                 )
                         except Exception as e:
                             job.errors += 1
-                            print(f"SMTP validation error: {str(e)}")
+                            print(f"[SMTP] ERROR: Validation error - {str(e)}")
                 
                 # Update SMTP server timestamps
                 db.session.commit()
+                print(f"[SMTP] SMTP validation completed: {valid_count} valid, {invalid_count} invalid out of {len(emails)} total")
             else:
                 # Standard validation (DNS/MX)
                 for idx, email_obj in enumerate(emails):
