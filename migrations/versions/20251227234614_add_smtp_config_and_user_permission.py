@@ -1,7 +1,7 @@
 """add smtp config and user permission
 
-Revision ID: 20251227_234614
-Revises: 20251227_141019
+Revision ID: 20251227234614
+Revises: 20251227141019
 Create Date: 2025-12-27 23:46:14.000000
 
 """
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '20251227_234614'
-down_revision = '20251227_141019'
+revision = '20251227234614'
+down_revision = '20251227141019'
 branch_labels = None
 depends_on = None
 
