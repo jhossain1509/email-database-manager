@@ -11,7 +11,7 @@
         <div class="table-responsive">
             <table class="table table-striped">
                 <thead>
-                    <tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th></tr>
+                    <tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>SMTP Permission</th><th>Created</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
                     {% for user in users %}
@@ -24,6 +24,13 @@
                             <span class="badge bg-success">Active</span>
                             {% else %}
                             <span class="badge bg-danger">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if user.smtp_verification_allowed %}
+                            <span class="badge bg-success"><i class="bi bi-shield-check"></i> Enabled</span>
+                            {% else %}
+                            <span class="badge bg-secondary"><i class="bi bi-shield-x"></i> Disabled</span>
                             {% endif %}
                         </td>
                         <td>{{ user.created_at.strftime('%Y-%m-%d') }}</td>

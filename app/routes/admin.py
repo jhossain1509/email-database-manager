@@ -110,6 +110,7 @@ def edit_user(user_id):
     if request.method == 'POST':
         role = request.form.get('role')
         is_active = request.form.get('is_active') == 'on'
+        smtp_verification_allowed = request.form.get('smtp_verification_allowed') == 'on'
         
         # Super admin restriction
         if role == 'super_admin' and current_user.role != 'super_admin':
@@ -122,9 +123,10 @@ def edit_user(user_id):
         
         user.role = role
         user.is_active = is_active
+        user.smtp_verification_allowed = smtp_verification_allowed
         db.session.commit()
         
-        log_activity('admin_action', f'Updated user: {user.username}', 'user', user.id)
+        log_activity('admin_action', f'Updated user: {user.username} (SMTP permission: {smtp_verification_allowed})', 'user', user.id)
         
         flash(f'User {user.username} updated successfully.', 'success')
         return redirect(url_for('admin.users'))
