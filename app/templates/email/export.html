@@ -14,11 +14,13 @@
                         <div class="mb-3">
                             <label for="export_type" class="form-label">Export Type</label>
                             <select class="form-select" id="export_type" name="export_type" required>
-                                <option value="verified">Verified Emails Only</option>
+                                <option value="verified">Verified Emails Only (All Methods)</option>
+                                <option value="smtp_verified">SMTP Verified Only</option>
                                 <option value="unverified">Unverified Emails Only</option>
                                 <option value="invalid">Invalid Emails Only</option>
                                 <option value="all">All Emails</option>
                             </select>
+                            <small class="form-text text-muted">SMTP Verified: Only emails validated using SMTP ping method</small>
                         </div>
                         
                         <!-- Batch Selection -->

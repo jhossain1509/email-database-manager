@@ -615,7 +615,7 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
     
     Args:
         user_id: User performing export
-        export_type: 'verified', 'unverified', 'invalid', or 'all'
+        export_type: 'verified', 'smtp_verified', 'unverified', 'invalid', or 'all'
         batch_id: Optional batch filter
         filter_domains: List of domains to filter
         domain_limits: Dict of domain: max_count limits
@@ -654,6 +654,8 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
             
             if export_type == 'verified':
                 query = query.filter_by(is_validated=True, is_valid=True)
+            elif export_type == 'smtp_verified':
+                query = query.filter_by(is_validated=True, is_valid=True, validation_method='smtp')
             elif export_type == 'unverified':
                 query = query.filter_by(is_validated=False)
             elif export_type == 'invalid':
@@ -917,7 +919,7 @@ def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_
     Args:
         user_id: Guest user ID
         batch_id: Batch ID to export
-        export_type: 'verified', 'unverified', 'invalid', 'rejected', or 'all'
+        export_type: 'verified', 'smtp_verified', 'unverified', 'invalid', 'rejected', or 'all'
         export_format: 'csv' or 'txt'
         custom_fields: List of fields to export (for CSV)
     """
@@ -959,6 +961,10 @@ def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_
                 # Only items that link to validated & valid emails
                 query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
                     .filter(Email.is_validated.is_(True), Email.is_valid.is_(True))
+            elif export_type == 'smtp_verified':
+                # Only items linked to SMTP validated & valid emails
+                query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
+                    .filter(Email.is_validated.is_(True), Email.is_valid.is_(True), Email.validation_method == 'smtp')
             elif export_type == 'unverified':
                 # Items linked to unvalidated emails
                 query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
