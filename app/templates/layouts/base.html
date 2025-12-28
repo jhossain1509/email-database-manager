@@ -78,6 +78,9 @@
                                 <li><a class="dropdown-item" href="{{ url_for('admin.ignore_domains') }}">Ignore Domains</a></li>
                                 <li><a class="dropdown-item" href="{{ url_for('admin.download_history') }}">Download History</a></li>
                                 <li><a class="dropdown-item" href="{{ url_for('admin.activity_logs') }}">Activity Logs</a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('admin.smtp_config') }}">
+                                    <i class="bi bi-envelope-at"></i> SMTP Config
+                                </a></li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li><a class="dropdown-item text-danger" href="{{ url_for('admin.cleanup') }}">
                                     <i class="bi bi-trash"></i> Email Cleanup

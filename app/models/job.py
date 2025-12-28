@@ -253,6 +253,11 @@ class SMTPConfig(db.Model):
     test_status = db.Column(db.String(50))  # success, failed, pending
     test_message = db.Column(db.Text)
     
+    # Rotation and threading
+    thread_count = db.Column(db.Integer, default=5, nullable=False)  # Concurrent threads
+    enable_rotation = db.Column(db.Boolean, default=True, nullable=False)  # Rotate SMTP servers
+    last_used_at = db.Column(db.DateTime)  # Last time this server was used
+    
     # Metadata
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

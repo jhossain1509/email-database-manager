@@ -78,12 +78,39 @@
                         
                         <!-- Validation Options -->
                         <div class="mb-3">
-                            <label class="form-label">Validation Options</label>
+                            <label class="form-label">Validation Method</label>
                             <div class="form-check">
-                                <input type="checkbox" class="form-check-input" id="check_dns" name="check_dns">
-                                <label class="form-check-label" for="check_dns">
-                                    Check DNS/MX records (slower but more accurate)
+                                <input type="radio" class="form-check-input" id="method_standard" name="validation_method" value="standard" checked>
+                                <label class="form-check-label" for="method_standard">
+                                    Standard Validation (DNS/MX check)
                                 </label>
+                            </div>
+                            <div class="form-check">
+                                <input type="radio" class="form-check-input" id="method_smtp" name="validation_method" value="smtp"
+                                       {% if current_user.is_guest() and not current_user.smtp_verification_allowed %}disabled{% endif %}>
+                                <label class="form-check-label" for="method_smtp">
+                                    SMTP Ping Verified (Most Accurate)
+                                    {% if current_user.is_guest() and not current_user.smtp_verification_allowed %}
+                                    <span class="badge bg-warning text-dark">Permission Required</span>
+                                    {% endif %}
+                                </label>
+                                <small class="form-text text-muted d-block">
+                                    Connects to mail server to verify email existence
+                                </small>
+                            </div>
+                        </div>
+                        
+                        <!-- Additional Validation Options -->
+                        <div class="mb-3">
+                            <label class="form-label">Additional Options</label>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="revalidate_existing" name="revalidate_existing">
+                                <label class="form-check-label" for="revalidate_existing">
+                                    Re-validate previously verified emails
+                                </label>
+                                <small class="form-text text-muted d-block">
+                                    Check this to re-run validation on already validated emails
+                                </small>
                             </div>
                             <div class="form-check">
                                 <input type="checkbox" class="form-check-input" id="check_role" name="check_role">
@@ -110,12 +137,16 @@
                     <ul>
                         <li>Email format and syntax</li>
                         <li>Domain validity</li>
-                        <li>Optionally: DNS/MX records</li>
-                        <li>Optionally: Role-based filtering</li>
+                        <li><strong>Standard:</strong> DNS/MX records</li>
+                        <li><strong>SMTP Ping:</strong> Direct mail server verification</li>
                     </ul>
                     <p class="text-muted small">
-                        <strong>Skip Already Validated:</strong> This form only shows batches and emails 
-                        that haven't been validated yet. Already validated emails won't be processed again.
+                        <strong>SMTP Verification:</strong> Most accurate method - directly checks with the mail 
+                        server if the email address exists. Requires SMTP configuration by admin.
+                    </p>
+                    <p class="text-muted small">
+                        <strong>Skip Already Validated:</strong> By default, only unverified emails are shown.
+                        Check "Re-validate existing" to re-run validation on previously validated emails.
                     </p>
                 </div>
             </div>

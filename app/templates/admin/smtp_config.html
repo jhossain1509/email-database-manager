@@ -13,6 +13,106 @@
         <div class="col-md-8">
             <div class="card">
                 <div class="card-header">
+                    <h5>Bulk SMTP Upload</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('admin.smtp_config') }}" id="bulkUploadForm">
+                        <input type="hidden" name="action" value="bulk_upload">
+                        
+                        <div class="mb-3">
+                            <label for="bulk_smtp_list" class="form-label">SMTP Servers (one per line)</label>
+                            <textarea class="form-control" id="bulk_smtp_list" name="bulk_smtp_list" rows="8" 
+                                      placeholder="smtp.example.com|587|user@example.com|password
+smtp2.example.com|25|user2@example.com|password2" required></textarea>
+                            <small class="form-text text-muted">
+                                Format: <code>host|port|username|password</code> (one per line)
+                            </small>
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="thread_count" class="form-label">Thread Count</label>
+                                <input type="number" class="form-control" id="thread_count" name="thread_count" 
+                                       value="5" min="1" max="20" required>
+                                <small class="form-text text-muted">Concurrent validation threads (1-20)</small>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check mt-4">
+                                    <input class="form-check-input" type="checkbox" id="enable_rotation" 
+                                           name="enable_rotation" checked>
+                                    <label class="form-check-label" for="enable_rotation">
+                                        Enable SMTP Rotation
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-upload"></i> Upload SMTP Servers
+                        </button>
+                    </form>
+                </div>
+            </div>
+            
+            {% if smtp_servers %}
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5>Current SMTP Servers ({{ smtp_servers|length }})</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Host</th>
+                                    <th>Port</th>
+                                    <th>Username</th>
+                                    <th>Status</th>
+                                    <th>Last Used</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for server in smtp_servers %}
+                                <tr>
+                                    <td>{{ server.smtp_host }}</td>
+                                    <td>{{ server.smtp_port }}</td>
+                                    <td>{{ server.smtp_username or '-' }}</td>
+                                    <td>
+                                        {% if server.is_active %}
+                                        <span class="badge bg-success">Active</span>
+                                        {% else %}
+                                        <span class="badge bg-secondary">Inactive</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if server.last_used_at %}
+                                        {{ server.last_used_at.strftime('%Y-%m-%d %H:%M') }}
+                                        {% else %}
+                                        Never
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <form method="POST" action="{{ url_for('admin.smtp_config') }}" style="display:inline;">
+                                            <input type="hidden" name="action" value="delete">
+                                            <input type="hidden" name="server_id" value="{{ server.id }}">
+                                            <button type="submit" class="btn btn-sm btn-danger" 
+                                                    onclick="return confirm('Delete this SMTP server?')">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            <div class="card">
+                <div class="card-header">
                     <h5>SMTP Server Settings</h5>
                 </div>
                 <div class="card-body">

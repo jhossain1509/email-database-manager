@@ -486,6 +486,84 @@ def smtp_config():
             except Exception as e:
                 return jsonify({'success': False, 'message': f'Connection failed: {str(e)}'})
         
+        elif action == 'bulk_upload':
+            # Bulk upload SMTP servers
+            bulk_list = request.form.get('bulk_smtp_list', '').strip()
+            thread_count = int(request.form.get('thread_count', 5))
+            enable_rotation = request.form.get('enable_rotation') == 'on'
+            
+            if not bulk_list:
+                flash('Please provide SMTP server list.', 'danger')
+                return redirect(url_for('admin.smtp_config'))
+            
+            lines = bulk_list.split('\n')
+            added_count = 0
+            error_count = 0
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                parts = line.split('|')
+                if len(parts) != 4:
+                    error_count += 1
+                    continue
+                
+                host, port, username, password = parts
+                
+                try:
+                    # Check if already exists
+                    existing = SMTPConfig.query.filter_by(
+                        smtp_host=host.strip(),
+                        smtp_port=int(port.strip()),
+                        smtp_username=username.strip()
+                    ).first()
+                    
+                    if existing:
+                        continue
+                    
+                    config = SMTPConfig(
+                        name=f'{host.strip()}:{port.strip()}',
+                        smtp_host=host.strip(),
+                        smtp_port=int(port.strip()),
+                        smtp_username=username.strip(),
+                        smtp_password=password.strip(),
+                        use_tls=int(port.strip()) == 587,
+                        use_ssl=int(port.strip()) == 465,
+                        timeout=30,
+                        is_active=True,
+                        thread_count=thread_count,
+                        enable_rotation=enable_rotation
+                    )
+                    db.session.add(config)
+                    added_count += 1
+                except Exception as e:
+                    error_count += 1
+                    continue
+            
+            db.session.commit()
+            
+            log_activity('admin_action', f'Bulk uploaded {added_count} SMTP servers')
+            
+            if added_count > 0:
+                flash(f'Successfully added {added_count} SMTP servers. {error_count} errors.', 'success')
+            else:
+                flash(f'No servers added. {error_count} errors.', 'warning')
+            
+            return redirect(url_for('admin.smtp_config'))
+        
+        elif action == 'delete':
+            # Delete SMTP server
+            server_id = request.form.get('server_id')
+            config = SMTPConfig.query.get(server_id)
+            if config:
+                db.session.delete(config)
+                db.session.commit()
+                log_activity('admin_action', f'Deleted SMTP server: {config.name}')
+                flash('SMTP server deleted successfully.', 'success')
+            return redirect(url_for('admin.smtp_config'))
+        
         elif action == 'save':
             # Save SMTP configuration
             config = SMTPConfig.query.first()
@@ -511,4 +589,5 @@ def smtp_config():
     
     # GET request - show form
     config = SMTPConfig.query.first()
-    return render_template('admin/smtp_config.html', config=config)
+    smtp_servers = SMTPConfig.query.order_by(SMTPConfig.is_active.desc(), SMTPConfig.last_used_at.desc()).all()
+    return render_template('admin/smtp_config.html', config=config, smtp_servers=smtp_servers)
