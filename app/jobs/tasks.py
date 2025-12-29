@@ -492,61 +492,88 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                 logger.info(f"[SMTP] Using SMTP verification with {len(smtp_servers)} server(s), {thread_count} thread(s)")
                 logger.info(f"[SMTP] Server list: {[f'{s.smtp_host}:{s.smtp_port}' for s in smtp_servers]}")
                 
+                # Extract SMTP server configs outside of threads (avoid Flask context issues)
+                smtp_configs_data = []
+                for s in smtp_servers:
+                    smtp_configs_data.append({
+                        'host': s.smtp_host,
+                        'port': s.smtp_port,
+                        'username': s.smtp_username,
+                        'password': s.smtp_password,
+                        'use_tls': s.use_tls,
+                        'use_ssl': s.use_ssl,
+                        'timeout': s.timeout or 30,
+                        'from_email': s.from_email
+                    })
+                
+                # Extract email data outside of threads (avoid Flask context issues)
+                emails_data = []
+                for email_obj in emails:
+                    emails_data.append({
+                        'id': email_obj.id,
+                        'email': email_obj.email
+                    })
+                
                 # SMTP validation with threading and rotation
-                def validate_with_smtp(email_obj, smtp_server_idx):
-                    """Validate single email using SMTP"""
-                    smtp_server = smtp_servers[smtp_server_idx % len(smtp_servers)]
-                    server_name = f"{smtp_server.smtp_host}:{smtp_server.smtp_port}"
+                def validate_with_smtp_thread(email_data, smtp_config):
+                    """
+                    Validate single email using SMTP (thread-safe, no Flask context needed)
+                    Returns: (email_id, email_address, is_valid, error_code, error_message)
+                    """
+                    email_address = email_data['email']
+                    email_id = email_data['id']
+                    server_name = f"{smtp_config['host']}:{smtp_config['port']}"
                     
-                    logger.debug(f"[SMTP] Validating {email_obj.email} using {server_name}")
+                    logger.debug(f"[SMTP] Validating {email_address} using {server_name}")
                     
                     is_valid, error_code, error_message = verify_email_smtp(
-                        email_obj.email,
-                        smtp_server.smtp_host,
-                        smtp_server.smtp_port,
-                        smtp_server.smtp_username,
-                        smtp_server.smtp_password,
-                        use_tls=smtp_server.use_tls,
-                        use_ssl=smtp_server.use_ssl,
-                        timeout=smtp_server.timeout or 30,
-                        from_email=smtp_server.from_email
+                        email_address,
+                        smtp_config['host'],
+                        smtp_config['port'],
+                        smtp_config['username'],
+                        smtp_config['password'],
+                        use_tls=smtp_config['use_tls'],
+                        use_ssl=smtp_config['use_ssl'],
+                        timeout=smtp_config['timeout'],
+                        from_email=smtp_config['from_email']
                     )
                     
                     # Log result
                     result_str = "VALID" if is_valid else f"INVALID ({error_message})"
-                    logger.debug(f"[SMTP] Email validated: {email_obj.email} - Result: {result_str}")
+                    logger.debug(f"[SMTP] Email validated: {email_address} - Result: {result_str}")
                     
-                    # Update last used timestamp for rotation
-                    smtp_server.last_used_at = dt.utcnow()
-                    
-                    return email_obj, is_valid, error_code, error_message
+                    return email_id, email_address, is_valid, error_code, error_message
                 
                 # Use ThreadPoolExecutor for concurrent SMTP validation
                 logger.info(f"[SMTP] Starting concurrent validation with thread pool (max_workers={thread_count})")
                 with ThreadPoolExecutor(max_workers=thread_count) as executor:
-                    futures = []
-                    for idx, email_obj in enumerate(emails):
+                    futures = {}
+                    for idx, email_data in enumerate(emails_data):
                         # Round-robin server selection
-                        future = executor.submit(validate_with_smtp, email_obj, idx)
-                        futures.append(future)
+                        smtp_config = smtp_configs_data[idx % len(smtp_configs_data)]
+                        future = executor.submit(validate_with_smtp_thread, email_data, smtp_config)
+                        futures[future] = email_data['id']
                     
                     # Process results as they complete
                     completed = 0
                     for future in as_completed(futures):
                         try:
-                            email_obj, is_valid, error_code, error_message = future.result()
+                            email_id, email_address, is_valid, error_code, error_message = future.result()
                             
-                            email_obj.is_validated = True
-                            email_obj.is_valid = is_valid
-                            email_obj.quality_score = 100 if is_valid else 0
-                            email_obj.update_rating()  # Calculate and set rating
-                            email_obj.validation_method = 'smtp'  # Mark as SMTP validated
-                            
-                            if not is_valid:
-                                email_obj.validation_error = f'SMTP: {error_message}' if error_message else 'Invalid'
-                                invalid_count += 1
-                            else:
-                                valid_count += 1
+                            # Find the email object and update it (in Flask context)
+                            email_obj = Email.query.get(email_id)
+                            if email_obj:
+                                email_obj.is_validated = True
+                                email_obj.is_valid = is_valid
+                                email_obj.quality_score = 100 if is_valid else 0
+                                email_obj.update_rating()  # Calculate and set rating
+                                email_obj.validation_method = 'smtp'  # Mark as SMTP validated
+                                
+                                if not is_valid:
+                                    email_obj.validation_error = f'SMTP: {error_message}' if error_message else 'Invalid'
+                                    invalid_count += 1
+                                else:
+                                    valid_count += 1
                             
                             completed += 1
                             
@@ -555,6 +582,15 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                                 logger.info(f"[SMTP] Progress: {completed}/{job.total} emails validated ({valid_count} valid, {invalid_count} invalid)")
                                 job.update_progress(completed)
                                 db.session.commit()
+                                
+                                # Emit progress via SocketIO
+                                emit_job_progress(job.job_id, {
+                                    'status': 'running',
+                                    'current': completed,
+                                    'total': job.total,
+                                    'percent': job.progress_percent,
+                                    'message': f'SMTP validating: {completed}/{job.total}'
+                                })
                                 
                                 self.update_state(
                                     state='PROGRESS',
@@ -568,7 +604,9 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                             job.errors += 1
                             logger.error(f"[SMTP] Validation error - {str(e)}")
                 
-                # Update SMTP server timestamps
+                # Final commit and SMTP server timestamp updates
+                for smtp_server in smtp_servers:
+                    smtp_server.last_used_at = dt.utcnow()
                 db.session.commit()
                 logger.info(f"[SMTP] SMTP validation completed: {valid_count} valid, {invalid_count} invalid out of {len(emails)} total")
             else:
