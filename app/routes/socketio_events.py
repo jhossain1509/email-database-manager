@@ -5,16 +5,19 @@ from flask import request
 from flask_login import current_user
 from flask_socketio import emit, join_room, leave_room
 from app import socketio
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @socketio.on('connect', namespace='/jobs')
 def handle_connect():
     """Handle client connection"""
     if current_user.is_authenticated:
-        print(f'Client connected: {current_user.username}')
+        logger.info(f'Client connected: {current_user.username}')
         emit('connection_response', {'status': 'connected', 'user': current_user.username})
     else:
-        print('Unauthenticated client attempted to connect')
+        logger.warning('Unauthenticated client attempted to connect')
         return False
 
 
@@ -22,7 +25,7 @@ def handle_connect():
 def handle_disconnect():
     """Handle client disconnection"""
     if current_user.is_authenticated:
-        print(f'Client disconnected: {current_user.username}')
+        logger.info(f'Client disconnected: {current_user.username}')
 
 
 @socketio.on('join_job', namespace='/jobs')
@@ -32,7 +35,7 @@ def handle_join_job(data):
         job_id = data.get('job_id')
         if job_id:
             join_room(job_id)
-            print(f'User {current_user.username} joined job room: {job_id}')
+            logger.info(f'User {current_user.username} joined job room: {job_id}')
             emit('join_response', {'status': 'joined', 'job_id': job_id})
 
 
@@ -43,5 +46,5 @@ def handle_leave_job(data):
         job_id = data.get('job_id')
         if job_id:
             leave_room(job_id)
-            print(f'User {current_user.username} left job room: {job_id}')
+            logger.info(f'User {current_user.username} left job room: {job_id}')
             emit('leave_response', {'status': 'left', 'job_id': job_id})

@@ -47,9 +47,11 @@ def create_app(config_class=Config):
     migrate.init_app(app, db)
     
     # Initialize SocketIO with Redis message queue for production
+    # CORS origins should be configured via environment variable in production
+    cors_origins = os.environ.get('SOCKETIO_CORS_ORIGINS', '*')
     socketio.init_app(app, 
                       message_queue=app.config['REDIS_URL'],
-                      cors_allowed_origins="*",
+                      cors_allowed_origins=cors_origins,
                       async_mode='threading')
     
     # Configure login

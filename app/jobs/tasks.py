@@ -11,6 +11,9 @@ import os
 import zipfile
 from datetime import datetime
 from flask import current_app
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def emit_job_progress(job_id, data):
@@ -23,7 +26,7 @@ def emit_job_progress(job_id, data):
         }, namespace='/jobs', broadcast=True)
     except Exception as e:
         # If SocketIO fails, just continue without real-time updates
-        print(f"Failed to emit progress: {str(e)}")
+        logger.error(f"Failed to emit progress: {str(e)}")
 
 
 @shared_task(bind=True)
