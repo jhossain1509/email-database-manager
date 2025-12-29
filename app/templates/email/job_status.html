@@ -25,7 +25,7 @@
             <div class="progress mb-3" style="height: 30px;">
                 <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
                      role="progressbar" 
-                     style="width: {{ job.progress_percent }}%"
+                     style="width: {{ job.progress_percent }}%; transition: width 0.3s ease-in-out;"
                      aria-valuenow="{{ job.progress_percent }}"
                      aria-valuemin="0"
                      aria-valuemax="100">
@@ -100,9 +100,21 @@
         document.getElementById('connection-status').classList.add('bg-secondary');
     });
     
+    // Throttle progress updates to prevent jerky animation
+    let lastProgressUpdate = 0;
+    const PROGRESS_UPDATE_INTERVAL = 300; // ms
+    
     // Listen for job progress updates
     socket.on('job_progress', function(data) {
         if (data.job_id === jobId) {
+            const now = Date.now();
+            
+            // Throttle updates for smoother animation
+            if (now - lastProgressUpdate < PROGRESS_UPDATE_INTERVAL && data.status === 'running') {
+                return;
+            }
+            lastProgressUpdate = now;
+            
             console.log('Progress update:', data);
             
             // Update progress display
@@ -110,7 +122,7 @@
             document.getElementById('job-total').textContent = data.total || 0;
             document.getElementById('job-percent').textContent = (data.percent || 0).toFixed(1);
             
-            // Update progress bar
+            // Update progress bar with smooth animation
             const progressBar = document.getElementById('progress-bar');
             const percent = data.percent || 0;
             progressBar.style.width = percent + '%';

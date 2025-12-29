@@ -1062,12 +1062,15 @@ def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_
                 ])
                 needs_email_join = True
             elif export_type == 'rejected':
-                # Items with result=rejected
+                # Items with result=rejected (policy violations, etc.)
                 query = query.filter(GuestEmailItem.result == 'rejected')
-            # 'all' exports everything - might still need join for rating filter
+            elif export_type == 'duplicate':
+                # Items that are duplicates of existing emails in main DB
+                query = query.filter(GuestEmailItem.result == 'duplicate')
+            # 'all' exports everything including duplicates - might still need join for rating filter
             
             # Apply rating filter if specified
-            if rating_filter and len(rating_filter) > 0 and export_type != 'rejected':
+            if rating_filter and len(rating_filter) > 0 and export_type not in ['rejected', 'duplicate']:
                 email_filters.append(Email.rating.in_(rating_filter))
                 needs_email_join = True
             

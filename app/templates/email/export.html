@@ -18,9 +18,15 @@
                                 <option value="smtp_verified">SMTP Verified Only</option>
                                 <option value="unverified">Unverified Emails Only</option>
                                 <option value="invalid">Invalid Emails Only</option>
+                                {% if current_user.is_guest() %}
+                                <option value="duplicate">Duplicate Emails (Already in Main DB)</option>
+                                {% endif %}
                                 <option value="all">All Emails</option>
                             </select>
-                            <small class="form-text text-muted">SMTP Verified: Only emails validated using SMTP ping method</small>
+                            <small class="form-text text-muted">
+                                SMTP Verified: Only emails validated using SMTP ping method
+                                {% if current_user.is_guest() %}<br>Duplicate: Emails that already exist in main database{% endif %}
+                            </small>
                         </div>
                         
                         <!-- Batch Selection -->
