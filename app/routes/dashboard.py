@@ -73,6 +73,14 @@ def guest_dashboard():
         Email.downloaded == False
     ).count()
     
+    # Rating statistics for guest
+    rating_stats = {
+        'A': Email.query.filter_by(uploaded_by=user_id, rating='A').count(),
+        'B': Email.query.filter_by(uploaded_by=user_id, rating='B').count(),
+        'C': Email.query.filter_by(uploaded_by=user_id, rating='C').count(),
+        'D': Email.query.filter_by(uploaded_by=user_id, rating='D').count(),
+    }
+    
     # Recent jobs
     recent_jobs = Job.query.filter_by(user_id=user_id)\
         .order_by(desc(Job.created_at))\
@@ -109,6 +117,7 @@ def guest_dashboard():
     return render_template(
         'dashboard/guest_dashboard.html',
         stats=stats,
+        rating_stats=rating_stats,
         top_domains=top_domains,
         recent_jobs=recent_jobs,
         recent_activities=recent_activities,
@@ -158,6 +167,14 @@ def user_dashboard():
         downloaded=False
     ).count()
     
+    # Rating statistics
+    rating_stats = {
+        'A': Email.query.filter_by(rating='A').count(),
+        'B': Email.query.filter_by(rating='B').count(),
+        'C': Email.query.filter_by(rating='C').count(),
+        'D': Email.query.filter_by(rating='D').count(),
+    }
+    
     # Top domains from entire DB
     top_domains = db.session.query(
         Email.domain_category,
@@ -188,6 +205,7 @@ def user_dashboard():
     return render_template(
         'dashboard/user_dashboard.html',
         stats=stats,
+        rating_stats=rating_stats,
         top_domains=top_domains,
         recent_jobs=recent_jobs,
         recent_activities=recent_activities,

@@ -370,6 +370,9 @@ def export():
         enable_random_limit = request.form.get('enable_random_limit') == 'on'
         random_limit = request.form.get('random_limit', type=int) if enable_random_limit else None
         
+        # Rating filter parameter
+        rating_filter = request.form.getlist('rating_filter')  # Get list of selected ratings
+        
         # Check batch access for guest users
         if batch_id:
             batch = Batch.query.get(batch_id)
@@ -395,7 +398,8 @@ def export():
                 export_type,
                 export_format,
                 fields_list,
-                random_limit  # Add random_limit parameter
+                random_limit,  # Add random_limit parameter
+                rating_filter  # Add rating_filter parameter
             )
         else:
             # Regular users use normal export
@@ -431,7 +435,8 @@ def export():
                 split_size,
                 export_format,
                 fields_list,
-                random_limit  # Add random_limit parameter
+                random_limit,  # Add random_limit parameter
+                rating_filter  # Add rating_filter parameter
             )
         
         # Create job record

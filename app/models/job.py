@@ -156,6 +156,7 @@ class DomainReputation(db.Model):
     
     # Reputation score (0-100)
     reputation_score = db.Column(db.Integer, default=50, nullable=False)
+    rating = db.Column(db.String(1), index=True)  # A, B, C, D rating
     
     # Metrics
     total_emails = db.Column(db.Integer, default=0, nullable=False)
@@ -182,6 +183,28 @@ class DomainReputation(db.Model):
         
         score = int((valid_rate * 70) + ((1 - bounce_rate) * 30))
         return max(0, min(100, score))
+    
+    def calculate_rating(self):
+        """
+        Calculate domain rating (A, B, C, D) based on reputation_score.
+        A: 80-100 (Excellent)
+        B: 60-79 (Good)
+        C: 40-59 (Fair)
+        D: 0-39 (Poor)
+        """
+        score = self.reputation_score
+        if score >= 80:
+            return 'A'
+        elif score >= 60:
+            return 'B'
+        elif score >= 40:
+            return 'C'
+        else:
+            return 'D'
+    
+    def update_rating(self):
+        """Update the rating field based on current reputation_score"""
+        self.rating = self.calculate_rating()
     
     def __repr__(self):
         return f'<DomainReputation {self.domain}: {self.reputation_score}>'

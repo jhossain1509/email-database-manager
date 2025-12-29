@@ -513,6 +513,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                             email_obj.is_validated = True
                             email_obj.is_valid = is_valid
                             email_obj.quality_score = 100 if is_valid else 0
+                            email_obj.update_rating()  # Calculate and set rating
                             email_obj.validation_method = 'smtp'  # Mark as SMTP validated
                             
                             if not is_valid:
@@ -561,6 +562,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                         email_obj.is_validated = True
                         email_obj.is_valid = is_valid
                         email_obj.quality_score = quality_score
+                        email_obj.update_rating()  # Calculate and set rating
                         
                         if not is_valid:
                             email_obj.validation_error = f'{error_type}: {error_message}'
@@ -588,6 +590,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                         email_obj.is_valid = False
                         email_obj.validation_error = f'Validation error: {str(e)}'
                         email_obj.quality_score = 0
+                        email_obj.update_rating()  # Calculate and set rating
                         invalid_count += 1
             
             # Final commit
@@ -625,7 +628,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
 @shared_task(bind=True)
 def export_emails_task(self, user_id, export_type='verified', batch_id=None, filter_domains=None, 
                        domain_limits=None, split_files=False, split_size=10000, 
-                       export_format='csv', custom_fields=None, random_limit=None):
+                       export_format='csv', custom_fields=None, random_limit=None, rating_filter=None):
     """
     Export emails with advanced filtering and options.
     Job-driven with progress reporting.
@@ -641,6 +644,7 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
         export_format: 'csv' or 'txt'
         custom_fields: List of fields to export (for CSV)
         random_limit: Optional limit to random sample of N emails
+        rating_filter: Optional list of ratings to filter (e.g., ['A', 'B'])
     """
     from app import create_app
     app = create_app()
@@ -679,6 +683,10 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
             elif export_type == 'invalid':
                 query = query.filter_by(is_validated=True, is_valid=False)
             # 'all' exports everything
+            
+            # Apply rating filter if specified
+            if rating_filter and len(rating_filter) > 0:
+                query = query.filter(Email.rating.in_(rating_filter))
             
             # Get suppression list
             suppressed = set([s.email for s in SuppressionList.query.all()])
@@ -938,7 +946,7 @@ def _write_export_file(emails, file_path, fields, export_format, suppressed, job
 
 
 @shared_task(bind=True)
-def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_format='csv', custom_fields=None, random_limit=None):
+def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_format='csv', custom_fields=None, random_limit=None, rating_filter=None):
     """
     Export emails for guest users from their GuestEmailItem scope.
     Does NOT update emails.downloaded or emails.download_count.
@@ -951,6 +959,7 @@ def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_
         export_format: 'csv' or 'txt'
         custom_fields: List of fields to export (for CSV)
         random_limit: Optional limit to random sample of N emails
+        rating_filter: Optional list of ratings to filter (e.g., ['A', 'B'])
     """
     from app import create_app
     app = create_app()
@@ -1006,6 +1015,12 @@ def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_
                 # Items with result=rejected
                 query = query.filter(GuestEmailItem.result == 'rejected')
             # 'all' exports everything
+            
+            # Apply rating filter if specified
+            if rating_filter and len(rating_filter) > 0:
+                if export_type != 'rejected':  # Rejected emails don't have ratings
+                    query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
+                        .filter(Email.rating.in_(rating_filter))
             
             # Apply random limit if specified
             if random_limit and random_limit > 0:
