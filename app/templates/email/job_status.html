@@ -1,26 +1,60 @@
 {% extends "layouts/base.html" %}
 {% block title %}Job Status{% endblock %}
+
+{% block head %}
+<!-- Socket.IO JavaScript client -->
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+{% endblock %}
+
 {% block content %}
 {% set show_download = job.status == 'completed' and job.job_type == 'export' and job.result_data and job.result_data.history_id %}
 <div class="container mt-4">
-    <h2><i class="bi bi-gear-fill"></i> Job Status</h2>
+    <h2><i class="bi bi-gear-fill"></i> Job Status - Real-time Monitoring</h2>
     <div class="card mt-4">
-        <div class="card-header"><h5>Job: {{ job.job_type|title }}</h5></div>
+        <div class="card-header"><h5>Job: <span id="job-type">{{ job.job_type|title }}</span></h5></div>
         <div class="card-body">
             <p><strong>Status:</strong> 
-                <span class="badge bg-{{ 'success' if job.status == 'completed' else 'primary' if job.status == 'running' else 'danger' if job.status == 'failed' else 'warning' }}">
+                <span id="job-status" class="badge bg-{{ 'success' if job.status == 'completed' else 'primary' if job.status == 'running' else 'danger' if job.status == 'failed' else 'warning' }}">
                     {{ job.status|upper }}
                 </span>
+                <span id="connection-status" class="badge bg-secondary ms-2" style="display: none;">
+                    <i class="bi bi-wifi"></i> Connected
+                </span>
             </p>
-            <p><strong>Progress:</strong> {{ job.processed }} / {{ job.total }} ({{ job.progress_percent|round(1) }}%)</p>
-            <div class="progress mb-3">
-                <div class="progress-bar" role="progressbar" style="width: {{ job.progress_percent }}%"></div>
+            <p id="progress-text"><strong>Progress:</strong> <span id="job-processed">{{ job.processed }}</span> / <span id="job-total">{{ job.total }}</span> (<span id="job-percent">{{ job.progress_percent|round(1) }}</span>%)</p>
+            <div class="progress mb-3" style="height: 30px;">
+                <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                     role="progressbar" 
+                     style="width: {{ job.progress_percent }}%"
+                     aria-valuenow="{{ job.progress_percent }}"
+                     aria-valuemin="0"
+                     aria-valuemax="100">
+                    <span id="progress-bar-text">{{ job.progress_percent|round(1) }}%</span>
+                </div>
             </div>
-            {% if job.result_message %}<p><strong>Result:</strong> {{ job.result_message }}</p>{% endif %}
-            {% if job.error_message %}<div class="alert alert-danger">{{ job.error_message }}</div>{% endif %}
+            
+            <div id="live-message" class="alert alert-info" style="display: none;">
+                <i class="bi bi-info-circle"></i> <span id="message-text"></span>
+            </div>
+            
+            {% if job.result_message %}
+            <p id="result-message"><strong>Result:</strong> {{ job.result_message }}</p>
+            {% else %}
+            <p id="result-message" style="display: none;"><strong>Result:</strong> <span id="result-text"></span></p>
+            {% endif %}
+            
+            {% if job.error_message %}
+            <div class="alert alert-danger" id="error-message">{{ job.error_message }}</div>
+            {% else %}
+            <div class="alert alert-danger" id="error-message" style="display: none;"><span id="error-text"></span></div>
+            {% endif %}
             
             {% if show_download %}
-            <div class="alert alert-success mt-3">
+            <div class="alert alert-success mt-3" id="download-alert">
+                <i class="bi bi-check-circle-fill"></i> Export completed successfully! You can download the file now.
+            </div>
+            {% else %}
+            <div class="alert alert-success mt-3" id="download-alert" style="display: none;">
                 <i class="bi bi-check-circle-fill"></i> Export completed successfully! You can download the file now.
             </div>
             {% endif %}
@@ -31,7 +65,11 @@
                 <a href="{{ url_for('email.batch_detail', batch_id=job.batch_id) }}" class="btn btn-primary">View Batch</a>
                 {% endif %}
                 {% if show_download %}
-                <a href="{{ url_for('email.download_export', history_id=job.result_data.history_id) }}" class="btn btn-success">
+                <a href="{{ url_for('email.download_export', history_id=job.result_data.history_id) }}" class="btn btn-success" id="download-btn">
+                    <i class="bi bi-download"></i> Download Export
+                </a>
+                {% else %}
+                <a href="#" class="btn btn-success" id="download-btn" style="display: none;">
                     <i class="bi bi-download"></i> Download Export
                 </a>
                 {% endif %}
@@ -39,10 +77,81 @@
         </div>
     </div>
 </div>
+
 <script>
-    // Auto-refresh if job is running
+    const jobId = '{{ job.job_id }}';
+    const jobStatus = '{{ job.status }}';
+    
+    // Connect to Socket.IO server
+    const socket = io('/jobs', {
+        transports: ['websocket', 'polling']
+    });
+    
+    socket.on('connect', function() {
+        console.log('Connected to real-time updates');
+        document.getElementById('connection-status').style.display = 'inline-block';
+        document.getElementById('connection-status').classList.remove('bg-secondary');
+        document.getElementById('connection-status').classList.add('bg-success');
+    });
+    
+    socket.on('disconnect', function() {
+        console.log('Disconnected from real-time updates');
+        document.getElementById('connection-status').classList.remove('bg-success');
+        document.getElementById('connection-status').classList.add('bg-secondary');
+    });
+    
+    // Listen for job progress updates
+    socket.on('job_progress', function(data) {
+        if (data.job_id === jobId) {
+            console.log('Progress update:', data);
+            
+            // Update progress display
+            document.getElementById('job-processed').textContent = data.current || 0;
+            document.getElementById('job-total').textContent = data.total || 0;
+            document.getElementById('job-percent').textContent = (data.percent || 0).toFixed(1);
+            
+            // Update progress bar
+            const progressBar = document.getElementById('progress-bar');
+            const percent = data.percent || 0;
+            progressBar.style.width = percent + '%';
+            progressBar.setAttribute('aria-valuenow', percent);
+            document.getElementById('progress-bar-text').textContent = percent.toFixed(1) + '%';
+            
+            // Update status badge
+            const statusBadge = document.getElementById('job-status');
+            statusBadge.textContent = (data.status || 'running').toUpperCase();
+            statusBadge.className = 'badge bg-' + (
+                data.status === 'completed' ? 'success' :
+                data.status === 'running' ? 'primary' :
+                data.status === 'failed' ? 'danger' : 'warning'
+            );
+            
+            // Show live message
+            if (data.message) {
+                document.getElementById('message-text').textContent = data.message;
+                document.getElementById('live-message').style.display = 'block';
+            }
+            
+            // If completed, reload page to show final result
+            if (data.status === 'completed' || data.status === 'failed') {
+                setTimeout(() => location.reload(), 2000);
+            }
+        }
+    });
+    
+    // Fallback: Auto-refresh if job is running and no socket updates
     {% if job.status in ['pending', 'running'] %}
-    setTimeout(() => location.reload(), 3000);
+    let lastUpdate = Date.now();
+    socket.on('job_progress', function() {
+        lastUpdate = Date.now();
+    });
+    
+    setInterval(function() {
+        // If no updates in 10 seconds, refresh page
+        if (Date.now() - lastUpdate > 10000) {
+            location.reload();
+        }
+    }, 10000);
     {% endif %}
 </script>
 {% endblock %}

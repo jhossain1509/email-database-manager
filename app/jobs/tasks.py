@@ -12,6 +12,20 @@ import zipfile
 from datetime import datetime
 from flask import current_app
 
+
+def emit_job_progress(job_id, data):
+    """Helper function to emit job progress via SocketIO"""
+    try:
+        from app import socketio
+        socketio.emit('job_progress', {
+            'job_id': job_id,
+            **data
+        }, namespace='/jobs', broadcast=True)
+    except Exception as e:
+        # If SocketIO fails, just continue without real-time updates
+        print(f"Failed to emit progress: {str(e)}")
+
+
 @shared_task(bind=True)
 def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False):
     """
@@ -242,6 +256,15 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
                     if (idx + 1) % 100 == 0:
                         job.update_progress(idx + 1)
                         db.session.commit()
+                        
+                        # Emit real-time progress via SocketIO
+                        emit_job_progress(job.job_id, {
+                            'status': 'running',
+                            'current': idx + 1,
+                            'total': job.total,
+                            'percent': job.progress_percent,
+                            'message': f'Importing emails... {idx + 1}/{job.total}'
+                        })
                         
                         # Update Celery task state
                         self.update_state(
@@ -574,6 +597,15 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                         if (idx + 1) % 50 == 0:
                             job.update_progress(idx + 1)
                             db.session.commit()
+                            
+                            # Emit real-time progress via SocketIO
+                            emit_job_progress(job.job_id, {
+                                'status': 'running',
+                                'current': idx + 1,
+                                'total': job.total,
+                                'percent': job.progress_percent,
+                                'message': f'Validating emails... {idx + 1}/{job.total}'
+                            })
                             
                             self.update_state(
                                 state='PROGRESS',
