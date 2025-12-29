@@ -443,10 +443,80 @@ def validate_email_enhanced(email, check_dns=False, check_smtp=False, check_role
     return True, None, None, quality_score, details
 
 
+def verify_email_direct_mx(email, from_email='verify@example.com', timeout=15):
+    """
+    Verify email by connecting directly to recipient's MX server (no authentication needed).
+    This is more accurate than relay SMTP as it checks actual mailbox existence.
+    
+    Args:
+        email: Email address to verify
+        from_email: Email to use in MAIL FROM command
+        timeout: Connection timeout in seconds
+    
+    Returns:
+        tuple: (is_valid, error_code, error_message)
+    """
+    import smtplib
+    import socket
+    
+    if not email or '@' not in email:
+        return False, 'invalid_format', 'Invalid email format'
+    
+    domain = email.split('@')[1]
+    
+    # Get MX records
+    try:
+        mx_records = dns.resolver.resolve(domain, 'MX')
+        mx_host = str(mx_records[0].exchange).rstrip('.')
+    except Exception as e:
+        return False, 'no_mx_record', f'No MX record found: {str(e)}'
+    
+    # Connect to recipient's MX server
+    try:
+        server = smtplib.SMTP(timeout=timeout)
+        server.connect(mx_host, 25)
+        server.ehlo()
+        
+        # Send MAIL FROM
+        code, msg = server.mail(from_email)
+        if code != 250:
+            server.quit()
+            return False, 'mail_from_failed', f'MAIL FROM rejected: {msg.decode()}'
+        
+        # Send RCPT TO - this checks if mailbox exists
+        code, msg = server.rcpt(email)
+        server.quit()
+        
+        # 250: Mailbox exists and is valid
+        # 550: No such user / Mailbox unavailable
+        # 551: User not local
+        # 553: Mailbox name not allowed
+        # 450-451: Temporary failure (greylisting) - treat as valid
+        
+        if code == 250:
+            return True, None, None
+        elif code in [550, 551, 553]:
+            return False, f'invalid_{code}', f'Mailbox not found: {msg.decode()}'
+        elif code in [450, 451, 452]:
+            # Greylisting - mailbox likely exists
+            return True, None, None
+        else:
+            return False, f'smtp_code_{code}', f'Verification failed: {msg.decode()}'
+    
+    except socket.timeout:
+        return False, 'timeout', f'Connection to {mx_host} timed out'
+    except smtplib.SMTPException as e:
+        return False, 'smtp_error', f'SMTP error: {str(e)}'
+    except Exception as e:
+        return False, 'connection_error', f'Connection error: {str(e)}'
+
+
 def verify_email_smtp(email, smtp_host, smtp_port, smtp_username, smtp_password, 
                       use_tls=True, use_ssl=False, timeout=30, from_email=None):
     """
-    Verify email using SMTP server by attempting RCPT TO command.
+    Verify email using SMTP relay server (for authenticated sending).
+    NOTE: Relay servers often accept all emails (250 response) without checking mailbox existence.
+    For real mailbox verification, use verify_email_direct_mx() instead.
     
     Args:
         email: Email address to verify

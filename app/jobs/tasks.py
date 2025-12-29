@@ -351,7 +351,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
     """
     from app import create_app
     from app.models.job import SMTPConfig
-    from app.utils.email_validator import verify_email_smtp
+    from app.utils.email_validator import verify_email_smtp, verify_email_direct_mx
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from datetime import datetime as dt
     
@@ -514,29 +514,50 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                         'email': email_obj.email
                     })
                 
-                # SMTP validation with threading and rotation
-                def validate_with_smtp_thread(email_data, smtp_config):
+                # Check if we should use Direct MX (more accurate) or Relay SMTP
+                use_direct_mx = current_app.config.get('SMTP_USE_DIRECT_MX', True)
+                logger.info(f"[SMTP] Verification method: {'Direct MX (accurate)' if use_direct_mx else 'Relay SMTP (may accept all)'}")
+                
+                # SMTP validation with threading
+                def validate_with_smtp_thread(email_data, smtp_config, use_direct_mx=True):
                     """
                     Validate single email using SMTP (thread-safe, no Flask context needed)
+                    
+                    Args:
+                        email_data: Dict with email_id and email_address
+                        smtp_config: SMTP server configuration
+                        use_direct_mx: If True, use direct MX (accurate). If False, use relay SMTP.
+                    
                     Returns: (email_id, email_address, is_valid, error_code, error_message)
                     """
                     email_address = email_data['email']
                     email_id = email_data['id']
-                    server_name = f"{smtp_config['host']}:{smtp_config['port']}"
                     
-                    logger.debug(f"[SMTP] Validating {email_address} using {server_name}")
-                    
-                    is_valid, error_code, error_message = verify_email_smtp(
-                        email_address,
-                        smtp_config['host'],
-                        smtp_config['port'],
-                        smtp_config['username'],
-                        smtp_config['password'],
-                        use_tls=smtp_config['use_tls'],
-                        use_ssl=smtp_config['use_ssl'],
-                        timeout=smtp_config['timeout'],
-                        from_email=smtp_config['from_email']
-                    )
+                    if use_direct_mx:
+                        # Direct MX verification - connects to recipient's mail server
+                        # Most accurate method - checks actual mailbox existence
+                        logger.debug(f"[SMTP] Validating {email_address} using Direct MX")
+                        is_valid, error_code, error_message = verify_email_direct_mx(
+                            email_address,
+                            from_email=smtp_config.get('from_email', 'verify@example.com'),
+                            timeout=15
+                        )
+                    else:
+                        # Relay SMTP verification - uses configured SMTP server
+                        # Less accurate - relay servers often accept all emails
+                        server_name = f"{smtp_config['host']}:{smtp_config['port']}"
+                        logger.debug(f"[SMTP] Validating {email_address} using Relay {server_name}")
+                        is_valid, error_code, error_message = verify_email_smtp(
+                            email_address,
+                            smtp_config['host'],
+                            smtp_config['port'],
+                            smtp_config['username'],
+                            smtp_config['password'],
+                            use_tls=smtp_config['use_tls'],
+                            use_ssl=smtp_config['use_ssl'],
+                            timeout=smtp_config['timeout'],
+                            from_email=smtp_config['from_email']
+                        )
                     
                     # Log result
                     result_str = "VALID" if is_valid else f"INVALID ({error_message})"
@@ -549,9 +570,9 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                 with ThreadPoolExecutor(max_workers=thread_count) as executor:
                     futures = {}
                     for idx, email_data in enumerate(emails_data):
-                        # Round-robin server selection
+                        # Round-robin server selection (for relay SMTP)
                         smtp_config = smtp_configs_data[idx % len(smtp_configs_data)]
-                        future = executor.submit(validate_with_smtp_thread, email_data, smtp_config)
+                        future = executor.submit(validate_with_smtp_thread, email_data, smtp_config, use_direct_mx)
                         futures[future] = email_data['id']
                     
                     # Process results as they complete
