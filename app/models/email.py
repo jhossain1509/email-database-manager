@@ -13,9 +13,11 @@ class Email(db.Model):
     is_validated = db.Column(db.Boolean, default=False, nullable=False, index=True)
     is_valid = db.Column(db.Boolean, default=None)
     validation_error = db.Column(db.Text)
+    validation_method = db.Column(db.String(20), index=True)  # 'standard', 'smtp'
     
     # Quality metrics
     quality_score = db.Column(db.Integer)  # 0-100
+    rating = db.Column(db.String(1), index=True)  # A, B, C, D rating based on quality
     
     # Tracking
     batch_id = db.Column(db.Integer, db.ForeignKey('batches.id'), nullable=False, index=True)
@@ -37,6 +39,30 @@ class Email(db.Model):
         db.Index('idx_email_domain', 'email', 'domain'),
         db.Index('idx_batch_valid', 'batch_id', 'is_valid'),
     )
+    
+    def calculate_rating(self):
+        """
+        Calculate email rating (A, B, C, D) based on quality_score and domain reputation.
+        A: 80-100 (Excellent quality)
+        B: 60-79 (Good quality)
+        C: 40-59 (Fair quality)
+        D: 0-39 (Poor quality)
+        """
+        if self.quality_score is None:
+            return None
+        
+        if self.quality_score >= 80:
+            return 'A'
+        elif self.quality_score >= 60:
+            return 'B'
+        elif self.quality_score >= 40:
+            return 'C'
+        else:
+            return 'D'
+    
+    def update_rating(self):
+        """Update the rating field based on current quality_score"""
+        self.rating = self.calculate_rating()
     
     def __repr__(self):
         return f'<Email {self.email}>'

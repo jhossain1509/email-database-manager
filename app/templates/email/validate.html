@@ -38,12 +38,19 @@
                                 <option value="">-- Select a batch --</option>
                                 {% for batch in batches %}
                                 <option value="{{ batch.id }}">
-                                    {{ batch.name }} ({{ batch.unverified_count }} unverified emails)
+                                    {{ batch.name }} 
+                                    {% if batch.unverified_count > 0 %}
+                                    ({{ batch.unverified_count }} unverified)
+                                    {% endif %}
+                                    {% if batch.standard_validated_count > 0 %}
+                                    {% if batch.unverified_count > 0 %}, {% endif %}
+                                    ({{ batch.standard_validated_count }} for SMTP re-validation)
+                                    {% endif %}
                                 </option>
                                 {% endfor %}
                             </select>
                             <small class="form-text text-muted">
-                                Only batches with unverified emails are shown
+                                Shows batches with unverified emails or emails validated with standard method (for SMTP re-validation)
                             </small>
                         </div>
                         
@@ -110,6 +117,15 @@
                                 </label>
                                 <small class="form-text text-muted d-block">
                                     Check this to re-run validation on already validated emails
+                                </small>
+                            </div>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="check_dns" name="check_dns" checked>
+                                <label class="form-check-label" for="check_dns">
+                                    Check DNS/MX records
+                                </label>
+                                <small class="form-text text-muted d-block">
+                                    Verify domain has valid mail server (MX records)
                                 </small>
                             </div>
                             <div class="form-check">

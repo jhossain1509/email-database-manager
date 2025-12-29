@@ -222,19 +222,22 @@ def validate():
         flash(f'Validation started! Job ID: {task.id}', 'success')
         return redirect(url_for('email.job_status', job_id=task.id))
     
-    # Get batches for selection (only show batches with unverified emails)
+    # Get batches for selection
     if current_user.is_guest():
         user_batches = Batch.query.filter_by(user_id=current_user.id).all()
     else:
         user_batches = Batch.query.filter_by(user_id=current_user.id).all()
     
-    # Filter batches to show only those with unverified emails
-    batches_with_unverified = []
+    # Show batches with unverified emails and also batches with standard-validated emails (for SMTP re-validation)
+    batches_with_emails = []
     for batch in user_batches:
         unverified_count = Email.query.filter_by(batch_id=batch.id, is_validated=False).count()
-        if unverified_count > 0:
+        standard_validated_count = Email.query.filter_by(batch_id=batch.id, is_validated=True, validation_method='standard').count()
+        
+        if unverified_count > 0 or standard_validated_count > 0:
             batch.unverified_count = unverified_count
-            batches_with_unverified.append(batch)
+            batch.standard_validated_count = standard_validated_count
+            batches_with_emails.append(batch)
     
     # Get domain statistics for filtering
     from flask import current_app
@@ -269,7 +272,7 @@ def validate():
     total_unverified = base_query.count()
     
     return render_template('email/validate.html', 
-                         batches=batches_with_unverified,
+                         batches=batches_with_emails,
                          domain_stats=domain_stats,
                          total_unverified=total_unverified)
 
@@ -370,6 +373,9 @@ def export():
         enable_random_limit = request.form.get('enable_random_limit') == 'on'
         random_limit = request.form.get('random_limit', type=int) if enable_random_limit else None
         
+        # Rating filter parameter
+        rating_filter = request.form.getlist('rating_filter')  # Get list of selected ratings
+        
         # Check batch access for guest users
         if batch_id:
             batch = Batch.query.get(batch_id)
@@ -395,7 +401,8 @@ def export():
                 export_type,
                 export_format,
                 fields_list,
-                random_limit  # Add random_limit parameter
+                random_limit,  # Add random_limit parameter
+                rating_filter  # Add rating_filter parameter
             )
         else:
             # Regular users use normal export
@@ -431,7 +438,8 @@ def export():
                 split_size,
                 export_format,
                 fields_list,
-                random_limit  # Add random_limit parameter
+                random_limit,  # Add random_limit parameter
+                rating_filter  # Add rating_filter parameter
             )
         
         # Create job record
@@ -485,6 +493,9 @@ def export():
                 verified = domain_query.join(GuestEmailItem.matched_email, isouter=False).filter(
                     Email.is_validated == True, Email.is_valid == True
                 ).count()
+                smtp_verified = domain_query.join(GuestEmailItem.matched_email, isouter=False).filter(
+                    Email.is_validated == True, Email.is_valid == True, Email.validation_method == 'smtp'
+                ).count()
                 unverified = domain_query.join(GuestEmailItem.matched_email, isouter=False).filter(
                     Email.is_validated == False
                 ).count()
@@ -499,6 +510,8 @@ def export():
                     'total': total,
                     'verified': verified,
                     'verified_available': verified,
+                    'smtp_verified': smtp_verified,
+                    'smtp_verified_available': smtp_verified,
                     'unverified': unverified,
                     'unverified_available': unverified,
                     'invalid': invalid,
@@ -516,6 +529,9 @@ def export():
             mixed_verified = mixed_query.join(GuestEmailItem.matched_email, isouter=False).filter(
                 Email.is_validated == True, Email.is_valid == True
             ).count()
+            mixed_smtp_verified = mixed_query.join(GuestEmailItem.matched_email, isouter=False).filter(
+                Email.is_validated == True, Email.is_valid == True, Email.validation_method == 'smtp'
+            ).count()
             mixed_unverified = mixed_query.join(GuestEmailItem.matched_email, isouter=False).filter(
                 Email.is_validated == False
             ).count()
@@ -528,6 +544,8 @@ def export():
                 'total': mixed_total,
                 'verified': mixed_verified,
                 'verified_available': mixed_verified,
+                'smtp_verified': mixed_smtp_verified,
+                'smtp_verified_available': mixed_smtp_verified,
                 'unverified': mixed_unverified,
                 'unverified_available': mixed_unverified,
                 'invalid': mixed_invalid,
@@ -552,11 +570,13 @@ def export():
             if total > 0:
                 # Count by validation status
                 verified = domain_query.filter_by(is_validated=True, is_valid=True).count()
+                smtp_verified = domain_query.filter_by(is_validated=True, is_valid=True, validation_method='smtp').count()
                 unverified = domain_query.filter_by(is_validated=False).count()
                 invalid = domain_query.filter_by(is_validated=True, is_valid=False).count()
                 
                 # Count available (not downloaded)
                 verified_available = domain_query.filter_by(is_validated=True, is_valid=True, downloaded=False).count()
+                smtp_verified_available = domain_query.filter_by(is_validated=True, is_valid=True, validation_method='smtp', downloaded=False).count()
                 unverified_available = domain_query.filter_by(is_validated=False, downloaded=False).count()
                 invalid_available = domain_query.filter_by(is_validated=True, is_valid=False, downloaded=False).count()
                 all_available = domain_query.filter_by(downloaded=False).count()
@@ -566,6 +586,8 @@ def export():
                     'total': total,
                     'verified': verified,
                     'verified_available': verified_available,
+                    'smtp_verified': smtp_verified,
+                    'smtp_verified_available': smtp_verified_available,
                     'unverified': unverified,
                     'unverified_available': unverified_available,
                     'invalid': invalid,
@@ -579,10 +601,12 @@ def export():
         mixed_total = mixed_query.count()
         if mixed_total > 0:
             mixed_verified = mixed_query.filter_by(is_validated=True, is_valid=True).count()
+            mixed_smtp_verified = mixed_query.filter_by(is_validated=True, is_valid=True, validation_method='smtp').count()
             mixed_unverified = mixed_query.filter_by(is_validated=False).count()
             mixed_invalid = mixed_query.filter_by(is_validated=True, is_valid=False).count()
             
             mixed_verified_available = mixed_query.filter_by(is_validated=True, is_valid=True, downloaded=False).count()
+            mixed_smtp_verified_available = mixed_query.filter_by(is_validated=True, is_valid=True, validation_method='smtp', downloaded=False).count()
             mixed_unverified_available = mixed_query.filter_by(is_validated=False, downloaded=False).count()
             mixed_invalid_available = mixed_query.filter_by(is_validated=True, is_valid=False, downloaded=False).count()
             mixed_all_available = mixed_query.filter_by(downloaded=False).count()
@@ -592,6 +616,8 @@ def export():
                 'total': mixed_total,
                 'verified': mixed_verified,
                 'verified_available': mixed_verified_available,
+                'smtp_verified': mixed_smtp_verified,
+                'smtp_verified_available': mixed_smtp_verified_available,
                 'unverified': mixed_unverified,
                 'unverified_available': mixed_unverified_available,
                 'invalid': mixed_invalid,

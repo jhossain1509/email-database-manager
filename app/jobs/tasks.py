@@ -11,6 +11,23 @@ import os
 import zipfile
 from datetime import datetime
 from flask import current_app
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def emit_job_progress(job_id, data):
+    """Helper function to emit job progress via SocketIO"""
+    try:
+        from app import socketio
+        socketio.emit('job_progress', {
+            'job_id': job_id,
+            **data
+        }, namespace='/jobs', broadcast=True)
+    except Exception as e:
+        # If SocketIO fails, just continue without real-time updates
+        logger.error(f"Failed to emit progress: {str(e)}")
+
 
 @shared_task(bind=True)
 def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False):
@@ -243,6 +260,15 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
                         job.update_progress(idx + 1)
                         db.session.commit()
                         
+                        # Emit real-time progress via SocketIO
+                        emit_job_progress(job.job_id, {
+                            'status': 'running',
+                            'current': idx + 1,
+                            'total': job.total,
+                            'percent': job.progress_percent,
+                            'message': f'Importing emails... {idx + 1}/{job.total}'
+                        })
+                        
                         # Update Celery task state
                         self.update_state(
                             state='PROGRESS',
@@ -255,7 +281,7 @@ def import_emails_task(self, batch_id, file_path, user_id, consent_granted=False
                 
                 except Exception as e:
                     job.errors += 1
-                    print(f"Error processing email {email}: {str(e)}")
+                    logger.error(f"Error processing email {email}: {str(e)}")
             
             # Final commit
             db.session.commit()
@@ -325,7 +351,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
     """
     from app import create_app
     from app.models.job import SMTPConfig
-    from app.utils.email_validator import verify_email_smtp
+    from app.utils.email_validator import verify_email_smtp, verify_email_direct_mx
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from datetime import datetime as dt
     
@@ -367,14 +393,14 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                 
                 if not smtp_configs:
                     # Fallback to DNS validation if no SMTP servers
-                    print(f"[SMTP] WARNING: No active SMTP servers configured. Falling back to DNS validation.")
+                    logger.warning("[SMTP] No active SMTP servers configured. Falling back to DNS validation.")
                     use_smtp = False
                     check_dns = True
                 else:
                     smtp_servers = smtp_configs
                     # Get thread count from first config (they should all have same setting)
                     thread_count = smtp_configs[0].thread_count if smtp_configs else 5
-                    print(f"[SMTP] Found {len(smtp_servers)} active SMTP server(s), thread_count={thread_count}")
+                    logger.info(f"[SMTP] Found {len(smtp_servers)} active SMTP server(s), thread_count={thread_count}")
             
             # Get ignore domains
             ignore_domains = [d.domain for d in IgnoreDomain.query.all()]
@@ -463,71 +489,129 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
             
             if use_smtp and smtp_servers:
                 # Log SMTP validation start
-                print(f"[SMTP] Using SMTP verification with {len(smtp_servers)} server(s), {thread_count} thread(s)")
-                print(f"[SMTP] Server list: {[f'{s.smtp_host}:{s.smtp_port}' for s in smtp_servers]}")
+                logger.info(f"[SMTP] Using SMTP verification with {len(smtp_servers)} server(s), {thread_count} thread(s)")
+                logger.info(f"[SMTP] Server list: {[f'{s.smtp_host}:{s.smtp_port}' for s in smtp_servers]}")
                 
-                # SMTP validation with threading and rotation
-                def validate_with_smtp(email_obj, smtp_server_idx):
-                    """Validate single email using SMTP"""
-                    smtp_server = smtp_servers[smtp_server_idx % len(smtp_servers)]
-                    server_name = f"{smtp_server.smtp_host}:{smtp_server.smtp_port}"
+                # Extract SMTP server configs outside of threads (avoid Flask context issues)
+                smtp_configs_data = []
+                for s in smtp_servers:
+                    smtp_configs_data.append({
+                        'host': s.smtp_host,
+                        'port': s.smtp_port,
+                        'username': s.smtp_username,
+                        'password': s.smtp_password,
+                        'use_tls': s.use_tls,
+                        'use_ssl': s.use_ssl,
+                        'timeout': s.timeout or 30,
+                        'from_email': s.from_email
+                    })
+                
+                # Extract email data outside of threads (avoid Flask context issues)
+                emails_data = []
+                for email_obj in emails:
+                    emails_data.append({
+                        'id': email_obj.id,
+                        'email': email_obj.email
+                    })
+                
+                # Check if we should use Direct MX (more accurate) or Relay SMTP
+                use_direct_mx = current_app.config.get('SMTP_USE_DIRECT_MX', True)
+                logger.info(f"[SMTP] Verification method: {'Direct MX (accurate)' if use_direct_mx else 'Relay SMTP (may accept all)'}")
+                
+                # SMTP validation with threading
+                def validate_with_smtp_thread(email_data, smtp_config, use_direct_mx=True):
+                    """
+                    Validate single email using SMTP (thread-safe, no Flask context needed)
                     
-                    print(f"[SMTP] Validating {email_obj.email} using {server_name}")
+                    Args:
+                        email_data: Dict with email_id and email_address
+                        smtp_config: SMTP server configuration
+                        use_direct_mx: If True, use direct MX (accurate). If False, use relay SMTP.
                     
-                    is_valid, error_code, error_message = verify_email_smtp(
-                        email_obj.email,
-                        smtp_server.smtp_host,
-                        smtp_server.smtp_port,
-                        smtp_server.smtp_username,
-                        smtp_server.smtp_password,
-                        use_tls=smtp_server.use_tls,
-                        use_ssl=smtp_server.use_ssl,
-                        timeout=smtp_server.timeout or 30,
-                        from_email=smtp_server.from_email
-                    )
+                    Returns: (email_id, email_address, is_valid, error_code, error_message)
+                    """
+                    email_address = email_data['email']
+                    email_id = email_data['id']
+                    
+                    if use_direct_mx:
+                        # Direct MX verification - connects to recipient's mail server
+                        # Most accurate method - checks actual mailbox existence
+                        logger.debug(f"[SMTP] Validating {email_address} using Direct MX")
+                        is_valid, error_code, error_message = verify_email_direct_mx(
+                            email_address,
+                            from_email=smtp_config.get('from_email', 'verify@example.com'),
+                            timeout=15
+                        )
+                    else:
+                        # Relay SMTP verification - uses configured SMTP server
+                        # Less accurate - relay servers often accept all emails
+                        server_name = f"{smtp_config['host']}:{smtp_config['port']}"
+                        logger.debug(f"[SMTP] Validating {email_address} using Relay {server_name}")
+                        is_valid, error_code, error_message = verify_email_smtp(
+                            email_address,
+                            smtp_config['host'],
+                            smtp_config['port'],
+                            smtp_config['username'],
+                            smtp_config['password'],
+                            use_tls=smtp_config['use_tls'],
+                            use_ssl=smtp_config['use_ssl'],
+                            timeout=smtp_config['timeout'],
+                            from_email=smtp_config['from_email']
+                        )
                     
                     # Log result
                     result_str = "VALID" if is_valid else f"INVALID ({error_message})"
-                    print(f"[SMTP] Email validated: {email_obj.email} - Result: {result_str}")
+                    logger.debug(f"[SMTP] Email validated: {email_address} - Result: {result_str}")
                     
-                    # Update last used timestamp for rotation
-                    smtp_server.last_used_at = dt.utcnow()
-                    
-                    return email_obj, is_valid, error_code, error_message
+                    return email_id, email_address, is_valid, error_code, error_message
                 
                 # Use ThreadPoolExecutor for concurrent SMTP validation
-                print(f"[SMTP] Starting concurrent validation with thread pool (max_workers={thread_count})")
+                logger.info(f"[SMTP] Starting concurrent validation with thread pool (max_workers={thread_count})")
                 with ThreadPoolExecutor(max_workers=thread_count) as executor:
-                    futures = []
-                    for idx, email_obj in enumerate(emails):
-                        # Round-robin server selection
-                        future = executor.submit(validate_with_smtp, email_obj, idx)
-                        futures.append(future)
+                    futures = {}
+                    for idx, email_data in enumerate(emails_data):
+                        # Round-robin server selection (for relay SMTP)
+                        smtp_config = smtp_configs_data[idx % len(smtp_configs_data)]
+                        future = executor.submit(validate_with_smtp_thread, email_data, smtp_config, use_direct_mx)
+                        futures[future] = email_data['id']
                     
                     # Process results as they complete
                     completed = 0
                     for future in as_completed(futures):
                         try:
-                            email_obj, is_valid, error_code, error_message = future.result()
+                            email_id, email_address, is_valid, error_code, error_message = future.result()
                             
-                            email_obj.is_validated = True
-                            email_obj.is_valid = is_valid
-                            email_obj.quality_score = 100 if is_valid else 0
-                            email_obj.validation_method = 'smtp'  # Mark as SMTP validated
-                            
-                            if not is_valid:
-                                email_obj.validation_error = f'SMTP: {error_message}' if error_message else 'Invalid'
-                                invalid_count += 1
-                            else:
-                                valid_count += 1
+                            # Find the email object and update it (in Flask context)
+                            email_obj = Email.query.get(email_id)
+                            if email_obj:
+                                email_obj.is_validated = True
+                                email_obj.is_valid = is_valid
+                                email_obj.quality_score = 100 if is_valid else 0
+                                email_obj.update_rating()  # Calculate and set rating
+                                email_obj.validation_method = 'smtp'  # Mark as SMTP validated
+                                
+                                if not is_valid:
+                                    email_obj.validation_error = f'SMTP: {error_message}' if error_message else 'Invalid'
+                                    invalid_count += 1
+                                else:
+                                    valid_count += 1
                             
                             completed += 1
                             
                             # Update progress every 50 emails
                             if completed % 50 == 0:
-                                print(f"[SMTP] Progress: {completed}/{job.total} emails validated ({valid_count} valid, {invalid_count} invalid)")
+                                logger.info(f"[SMTP] Progress: {completed}/{job.total} emails validated ({valid_count} valid, {invalid_count} invalid)")
                                 job.update_progress(completed)
                                 db.session.commit()
+                                
+                                # Emit progress via SocketIO
+                                emit_job_progress(job.job_id, {
+                                    'status': 'running',
+                                    'current': completed,
+                                    'total': job.total,
+                                    'percent': job.progress_percent,
+                                    'message': f'SMTP validating: {completed}/{job.total}'
+                                })
                                 
                                 self.update_state(
                                     state='PROGRESS',
@@ -539,15 +623,65 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                                 )
                         except Exception as e:
                             job.errors += 1
-                            print(f"[SMTP] ERROR: Validation error - {str(e)}")
+                            logger.error(f"[SMTP] Validation error - {str(e)}")
                 
-                # Update SMTP server timestamps
+                # Final commit and SMTP server timestamp updates
+                for smtp_server in smtp_servers:
+                    smtp_server.last_used_at = dt.utcnow()
                 db.session.commit()
-                print(f"[SMTP] SMTP validation completed: {valid_count} valid, {invalid_count} invalid out of {len(emails)} total")
+                logger.info(f"[SMTP] SMTP validation completed: {valid_count} valid, {invalid_count} invalid out of {len(emails)} total")
             else:
                 # Standard validation (DNS/MX)
                 for idx, email_obj in enumerate(emails):
                     try:
+                        # Check for pause/cancel requests
+                        control_action = job.check_control_flags()
+                        if control_action == 'cancel':
+                            job.status = 'cancelled'
+                            job.completed_at = datetime.utcnow()
+                            job.result_message = f'Validation cancelled by user. Processed {idx}/{job.total} emails.'
+                            db.session.commit()
+                            logger.info(f"Job {job.job_id} cancelled by user")
+                            return
+                        elif control_action == 'pause':
+                            job.status = 'paused'
+                            job.result_message = f'Validation paused. Processed {idx}/{job.total} emails so far.'
+                            db.session.commit()
+                            logger.info(f"Job {job.job_id} paused at {idx}/{job.total}")
+                            
+                            # Emit pause status
+                            emit_job_progress(job.job_id, {
+                                'status': 'paused',
+                                'current': idx,
+                                'total': job.total,
+                                'percent': job.progress_percent,
+                                'message': 'Validation paused'
+                            })
+                            
+                            # Wait loop while paused
+                            while job.pause_requested:
+                                import time
+                                time.sleep(2)
+                                db.session.refresh(job)
+                                
+                                # Check if cancelled while paused
+                                if job.cancel_requested:
+                                    job.status = 'cancelled'
+                                    job.completed_at = datetime.utcnow()
+                                    db.session.commit()
+                                    logger.info(f"Job {job.job_id} cancelled while paused")
+                                    return
+                            
+                            # Resumed
+                            logger.info(f"Job {job.job_id} resumed")
+                            emit_job_progress(job.job_id, {
+                                'status': 'running',
+                                'current': idx,
+                                'total': job.total,
+                                'percent': job.progress_percent,
+                                'message': 'Validation resumed'
+                            })
+                        
                         # Enhanced validation with quality scoring
                         is_valid, error_type, error_message, quality_score, details = validate_email_enhanced(
                             email_obj.email,
@@ -561,6 +695,8 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                         email_obj.is_validated = True
                         email_obj.is_valid = is_valid
                         email_obj.quality_score = quality_score
+                        email_obj.validation_method = 'standard'  # Mark as standard validation
+                        email_obj.update_rating()  # Calculate and set rating
                         
                         if not is_valid:
                             email_obj.validation_error = f'{error_type}: {error_message}'
@@ -572,6 +708,15 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                         if (idx + 1) % 50 == 0:
                             job.update_progress(idx + 1)
                             db.session.commit()
+                            
+                            # Emit real-time progress via SocketIO
+                            emit_job_progress(job.job_id, {
+                                'status': 'running',
+                                'current': idx + 1,
+                                'total': job.total,
+                                'percent': job.progress_percent,
+                                'message': f'Validating emails... {idx + 1}/{job.total}'
+                            })
                             
                             self.update_state(
                                 state='PROGRESS',
@@ -588,6 +733,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                         email_obj.is_valid = False
                         email_obj.validation_error = f'Validation error: {str(e)}'
                         email_obj.quality_score = 0
+                        email_obj.update_rating()  # Calculate and set rating
                         invalid_count += 1
             
             # Final commit
@@ -625,7 +771,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
 @shared_task(bind=True)
 def export_emails_task(self, user_id, export_type='verified', batch_id=None, filter_domains=None, 
                        domain_limits=None, split_files=False, split_size=10000, 
-                       export_format='csv', custom_fields=None, random_limit=None):
+                       export_format='csv', custom_fields=None, random_limit=None, rating_filter=None):
     """
     Export emails with advanced filtering and options.
     Job-driven with progress reporting.
@@ -641,6 +787,7 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
         export_format: 'csv' or 'txt'
         custom_fields: List of fields to export (for CSV)
         random_limit: Optional limit to random sample of N emails
+        rating_filter: Optional list of ratings to filter (e.g., ['A', 'B'])
     """
     from app import create_app
     app = create_app()
@@ -679,6 +826,10 @@ def export_emails_task(self, user_id, export_type='verified', batch_id=None, fil
             elif export_type == 'invalid':
                 query = query.filter_by(is_validated=True, is_valid=False)
             # 'all' exports everything
+            
+            # Apply rating filter if specified
+            if rating_filter and len(rating_filter) > 0:
+                query = query.filter(Email.rating.in_(rating_filter))
             
             # Get suppression list
             suppressed = set([s.email for s in SuppressionList.query.all()])
@@ -938,7 +1089,7 @@ def _write_export_file(emails, file_path, fields, export_format, suppressed, job
 
 
 @shared_task(bind=True)
-def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_format='csv', custom_fields=None, random_limit=None):
+def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_format='csv', custom_fields=None, random_limit=None, rating_filter=None):
     """
     Export emails for guest users from their GuestEmailItem scope.
     Does NOT update emails.downloaded or emails.download_count.
@@ -951,6 +1102,7 @@ def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_
         export_format: 'csv' or 'txt'
         custom_fields: List of fields to export (for CSV)
         random_limit: Optional limit to random sample of N emails
+        rating_filter: Optional list of ratings to filter (e.g., ['A', 'B'])
     """
     from app import create_app
     app = create_app()
@@ -985,27 +1137,55 @@ def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_
                 batch_id=batch_id
             )
             
+            # Build filters list based on export_type and rating
+            email_filters = []
+            needs_email_join = False
+            
             # Apply filters based on export_type
             if export_type == 'verified':
                 # Only items that link to validated & valid emails
-                query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
-                    .filter(Email.is_validated.is_(True), Email.is_valid.is_(True))
+                email_filters.extend([
+                    Email.is_validated.is_(True),
+                    Email.is_valid.is_(True)
+                ])
+                needs_email_join = True
             elif export_type == 'smtp_verified':
                 # Only items linked to SMTP validated & valid emails
-                query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
-                    .filter(Email.is_validated.is_(True), Email.is_valid.is_(True), Email.validation_method == 'smtp')
+                email_filters.extend([
+                    Email.is_validated.is_(True),
+                    Email.is_valid.is_(True),
+                    Email.validation_method == 'smtp'
+                ])
+                needs_email_join = True
             elif export_type == 'unverified':
                 # Items linked to unvalidated emails
-                query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
-                    .filter(Email.is_validated.is_(False))
+                email_filters.append(Email.is_validated.is_(False))
+                needs_email_join = True
             elif export_type == 'invalid':
                 # Items linked to validated but invalid emails
-                query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
-                    .filter(Email.is_validated.is_(True), Email.is_valid.is_(False))
+                email_filters.extend([
+                    Email.is_validated.is_(True),
+                    Email.is_valid.is_(False)
+                ])
+                needs_email_join = True
             elif export_type == 'rejected':
-                # Items with result=rejected
+                # Items with result=rejected (policy violations, etc.)
                 query = query.filter(GuestEmailItem.result == 'rejected')
-            # 'all' exports everything
+            elif export_type == 'duplicate':
+                # Items that are duplicates of existing emails in main DB
+                query = query.filter(GuestEmailItem.result == 'duplicate')
+            # 'all' exports everything including duplicates - might still need join for rating filter
+            
+            # Apply rating filter if specified
+            if rating_filter and len(rating_filter) > 0 and export_type not in ['rejected', 'duplicate']:
+                email_filters.append(Email.rating.in_(rating_filter))
+                needs_email_join = True
+            
+            # Apply the join and filters if needed
+            if needs_email_join:
+                query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)
+                if email_filters:
+                    query = query.filter(*email_filters)
             
             # Apply random limit if specified
             if random_limit and random_limit > 0:

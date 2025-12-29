@@ -23,12 +23,21 @@ class Config:
     CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
     CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
     
-    # Top domains for classification
-    TOP_DOMAINS = [
-        'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
-        'aol.com', 'icloud.com', 'protonmail.com', 'mail.com',
-        'zoho.com', 'gmx.com'
+    # Domain categories for classification
+    GLOBAL_DOMAINS = [
+        'gmail.com', 'outlook.com', 'hotmail.com', 'aol.com',
+        'icloud.com', 'msn.com', 'live.com', 'yahoo.com'
     ]
+    
+    NET_ISP_DOMAINS = [
+        'att.net', 'comcast.net', 'verizon.net', 'cox.net',
+        'sbcglobal.net', 'bellsouth.net', 'charter.net', 'spectrum.net',
+        'optimum.net', 'earthlink.net', 'frontiernet.net', 'centurylink.net',
+        'windstream.net', 'suddenlink.net', 'mediacomcc.net', 'pacbell.net'
+    ]
+    
+    # Combined TOP_DOMAINS for backward compatibility
+    TOP_DOMAINS = GLOBAL_DOMAINS + NET_ISP_DOMAINS
     
     # Policy suffixes to block
     BLOCKED_POLICY_SUFFIXES = ['.gov', '.edu']

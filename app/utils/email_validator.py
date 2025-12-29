@@ -7,13 +7,81 @@ from flask import current_app
 # Initialize public suffix list
 psl = publicsuffix2.PublicSuffixList()
 
+# Enhanced email validation patterns
+EMAIL_REGEX = re.compile(
+    r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+)
+
+COMMON_DOMAINS = [
+    "gmail.com", "googlemail.com", "yahoo.com", "outlook.com",
+    "hotmail.com", "aol.com", "icloud.com", "msn.com", "live.com",
+    "att.net", "comcast.net", "verizon.net", "cox.net", "bellsouth.net",
+    "sbcglobal.net", "charter.net", "spectrum.net", "optimum.net", "earthlink.net",
+    "frontiernet.net", "centurylink.net", "windstream.net", "suddenlink.net",
+    "mediacomcc.net", "pacbell.net", "ymail.com", "me.com", "mac.com"
+]
+
+COMMON_TLD_TYPO_SUFFIXES = (
+    ".con", ".cim", ".vom", ".cpm", ".comm", ".xom", ".om",
+    ".col", ".clm", ".ner", ".nrt", ".netet", ".neti", ".netbruno"
+)
+
+ROLE_LOCALS = {
+    "admin", "info", "support", "sales", "contact",
+    "postmaster", "abuse", "mailer-daemon",
+    "noreply", "no-reply"
+}
+
+FAKE_LOCALS = {
+    "test", "demo", "none", "na", "unknown", "noemail",
+    "asdf", "qwerty", "sample", "example"
+}
+
+
+def _entropy(s: str) -> float:
+    """Calculate Shannon entropy of a string"""
+    if not s:
+        return 0.0
+    from collections import Counter
+    import math
+    counts = Counter(s)
+    length = len(s)
+    return -sum((count/length) * math.log2(count/length) for count in counts.values())
+
+
+def has_typo_tld(email: str) -> bool:
+    """Check if email has a common TLD typo"""
+    email_lower = email.lower()
+    return any(email_lower.endswith(typo) for typo in COMMON_TLD_TYPO_SUFFIXES)
+
+
+def is_fake_local(email: str) -> bool:
+    """Check if local part is a fake/test email"""
+    local_part = email.split('@')[0].lower()
+    return local_part in FAKE_LOCALS
+
+
 def is_valid_email_syntax(email):
-    """Check if email has valid syntax"""
+    """Check if email has valid syntax with enhanced regex"""
+    # First check with our regex
+    if not EMAIL_REGEX.match(email):
+        return False, "Invalid email format"
+    
+    # Check for TLD typos
+    if has_typo_tld(email):
+        return False, "Common TLD typo detected"
+    
+    # Check for fake local parts
+    if is_fake_local(email):
+        return False, "Fake/test email detected"
+    
+    # Then validate with email_validator library
     try:
         validate_email_lib(email, check_deliverability=False)
         return True, None
     except EmailNotValidError as e:
         return False, str(e)
+
 
 def extract_domain(email):
     """Extract domain from email"""
@@ -35,13 +103,9 @@ def check_dns_mx(domain):
 
 def is_role_based_email(email):
     """Check if email uses role-based local part"""
-    role_prefixes = [
-        'admin', 'info', 'support', 'sales', 'contact', 'help',
-        'webmaster', 'postmaster', 'noreply', 'no-reply', 'abuse'
-    ]
-    
     local_part = email.split('@')[0].lower()
-    return any(local_part.startswith(prefix) for prefix in role_prefixes)
+    return local_part in ROLE_LOCALS or any(local_part.startswith(prefix) for prefix in ROLE_LOCALS)
+
 
 def get_public_suffix(domain):
     """Get the public suffix of a domain"""
@@ -379,10 +443,80 @@ def validate_email_enhanced(email, check_dns=False, check_smtp=False, check_role
     return True, None, None, quality_score, details
 
 
+def verify_email_direct_mx(email, from_email='verify@example.com', timeout=15):
+    """
+    Verify email by connecting directly to recipient's MX server (no authentication needed).
+    This is more accurate than relay SMTP as it checks actual mailbox existence.
+    
+    Args:
+        email: Email address to verify
+        from_email: Email to use in MAIL FROM command
+        timeout: Connection timeout in seconds
+    
+    Returns:
+        tuple: (is_valid, error_code, error_message)
+    """
+    import smtplib
+    import socket
+    
+    if not email or '@' not in email:
+        return False, 'invalid_format', 'Invalid email format'
+    
+    domain = email.split('@')[1]
+    
+    # Get MX records
+    try:
+        mx_records = dns.resolver.resolve(domain, 'MX')
+        mx_host = str(mx_records[0].exchange).rstrip('.')
+    except Exception as e:
+        return False, 'no_mx_record', f'No MX record found: {str(e)}'
+    
+    # Connect to recipient's MX server
+    try:
+        server = smtplib.SMTP(timeout=timeout)
+        server.connect(mx_host, 25)
+        server.ehlo()
+        
+        # Send MAIL FROM
+        code, msg = server.mail(from_email)
+        if code != 250:
+            server.quit()
+            return False, 'mail_from_failed', f'MAIL FROM rejected: {msg.decode()}'
+        
+        # Send RCPT TO - this checks if mailbox exists
+        code, msg = server.rcpt(email)
+        server.quit()
+        
+        # 250: Mailbox exists and is valid
+        # 550: No such user / Mailbox unavailable
+        # 551: User not local
+        # 553: Mailbox name not allowed
+        # 450-451: Temporary failure (greylisting) - treat as valid
+        
+        if code == 250:
+            return True, None, None
+        elif code in [550, 551, 553]:
+            return False, f'invalid_{code}', f'Mailbox not found: {msg.decode()}'
+        elif code in [450, 451, 452]:
+            # Greylisting - mailbox likely exists
+            return True, None, None
+        else:
+            return False, f'smtp_code_{code}', f'Verification failed: {msg.decode()}'
+    
+    except socket.timeout:
+        return False, 'timeout', f'Connection to {mx_host} timed out'
+    except smtplib.SMTPException as e:
+        return False, 'smtp_error', f'SMTP error: {str(e)}'
+    except Exception as e:
+        return False, 'connection_error', f'Connection error: {str(e)}'
+
+
 def verify_email_smtp(email, smtp_host, smtp_port, smtp_username, smtp_password, 
                       use_tls=True, use_ssl=False, timeout=30, from_email=None):
     """
-    Verify email using SMTP server by attempting RCPT TO command.
+    Verify email using SMTP relay server (for authenticated sending).
+    NOTE: Relay servers often accept all emails (250 response) without checking mailbox existence.
+    For real mailbox verification, use verify_email_direct_mx() instead.
     
     Args:
         email: Email address to verify

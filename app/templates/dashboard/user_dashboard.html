@@ -64,6 +64,65 @@
         </div>
     </div>
     
+    <!-- Email Rating Statistics -->
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="bi bi-star"></i> Email Quality Ratings</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="card mb-3" style="border-left: 4px solid #28a745;">
+                                <div class="card-body">
+                                    <h6 class="card-subtitle mb-2 text-muted">
+                                        <i class="bi bi-star-fill text-success"></i> A Rating (80-100)
+                                    </h6>
+                                    <h3 class="card-title text-success">{{ rating_stats.A }}</h3>
+                                    <small class="text-muted">Excellent Quality</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card mb-3" style="border-left: 4px solid #17a2b8;">
+                                <div class="card-body">
+                                    <h6 class="card-subtitle mb-2 text-muted">
+                                        <i class="bi bi-star-fill text-info"></i> B Rating (60-79)
+                                    </h6>
+                                    <h3 class="card-title text-info">{{ rating_stats.B }}</h3>
+                                    <small class="text-muted">Good Quality</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card mb-3" style="border-left: 4px solid #ffc107;">
+                                <div class="card-body">
+                                    <h6 class="card-subtitle mb-2 text-muted">
+                                        <i class="bi bi-star-fill text-warning"></i> C Rating (40-59)
+                                    </h6>
+                                    <h3 class="card-title text-warning">{{ rating_stats.C }}</h3>
+                                    <small class="text-muted">Fair Quality</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card mb-3" style="border-left: 4px solid #dc3545;">
+                                <div class="card-body">
+                                    <h6 class="card-subtitle mb-2 text-muted">
+                                        <i class="bi bi-star-fill text-danger"></i> D Rating (0-39)
+                                    </h6>
+                                    <h3 class="card-title text-danger">{{ rating_stats.D }}</h3>
+                                    <small class="text-muted">Poor Quality</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
     <div class="row mt-4">
         <div class="col-md-6">
             <div class="card">

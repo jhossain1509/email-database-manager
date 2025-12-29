@@ -18,9 +18,15 @@
                                 <option value="smtp_verified">SMTP Verified Only</option>
                                 <option value="unverified">Unverified Emails Only</option>
                                 <option value="invalid">Invalid Emails Only</option>
+                                {% if current_user.is_guest() %}
+                                <option value="duplicate">Duplicate Emails (Already in Main DB)</option>
+                                {% endif %}
                                 <option value="all">All Emails</option>
                             </select>
-                            <small class="form-text text-muted">SMTP Verified: Only emails validated using SMTP ping method</small>
+                            <small class="form-text text-muted">
+                                SMTP Verified: Only emails validated using SMTP ping method
+                                {% if current_user.is_guest() %}<br>Duplicate: Emails that already exist in main database{% endif %}
+                            </small>
                         </div>
                         
                         <!-- Batch Selection -->
@@ -56,6 +62,40 @@
                             </small>
                         </div>
                         
+                        <!-- Quality Rating Filter -->
+                        <div class="mb-3">
+                            <label class="form-label">Filter by Quality Rating (Optional)</label>
+                            <div class="card">
+                                <div class="card-body">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="rating_a" name="rating_filter" value="A">
+                                        <label class="form-check-label" for="rating_a">
+                                            <span class="badge bg-success">A</span> Excellent (80-100) - High quality emails
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="rating_b" name="rating_filter" value="B">
+                                        <label class="form-check-label" for="rating_b">
+                                            <span class="badge bg-info">B</span> Good (60-79) - Good quality emails
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="rating_c" name="rating_filter" value="C">
+                                        <label class="form-check-label" for="rating_c">
+                                            <span class="badge bg-warning">C</span> Fair (40-59) - Fair quality emails
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="rating_d" name="rating_filter" value="D">
+                                        <label class="form-check-label" for="rating_d">
+                                            <span class="badge bg-danger">D</span> Poor (0-39) - Poor quality emails
+                                        </label>
+                                    </div>
+                                    <small class="form-text text-muted">Leave all unchecked to export all ratings</small>
+                                </div>
+                            </div>
+                        </div>
+                        
                         <!-- Domain Filtering with Limits -->
                         <div class="mb-3">
                             <label class="form-label">Filter by Domains with Limits</label>
@@ -80,6 +120,7 @@
                                             <span class="badge bg-info domain-count" 
                                                   data-domain="{{ stat.domain }}"
                                                   data-verified="{{ stat.verified_available }}"
+                                                  data-smtp-verified="{{ stat.smtp_verified_available|default(0) }}"
                                                   data-unverified="{{ stat.unverified_available }}"
                                                   data-invalid="{{ stat.invalid_available }}"
                                                   data-all="{{ stat.all_available }}">
@@ -206,6 +247,9 @@ function updateDomainCounts() {
         switch(exportType) {
             case 'verified':
                 count = parseInt(badge.dataset.verified);
+                break;
+            case 'smtp_verified':
+                count = parseInt(badge.dataset.smtpVerified || 0);
                 break;
             case 'unverified':
                 count = parseInt(badge.dataset.unverified);

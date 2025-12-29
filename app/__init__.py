@@ -2,6 +2,7 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
+from flask_socketio import SocketIO
 from celery import Celery
 from config import Config
 import os
@@ -9,6 +10,7 @@ import os
 db = SQLAlchemy()
 login_manager = LoginManager()
 migrate = Migrate()
+socketio = SocketIO()
 
 # Create Celery instance
 celery = Celery(__name__)
@@ -44,6 +46,14 @@ def create_app(config_class=Config):
     login_manager.init_app(app)
     migrate.init_app(app, db)
     
+    # Initialize SocketIO with Redis message queue for production
+    # CORS origins should be configured via environment variable in production
+    cors_origins = os.environ.get('SOCKETIO_CORS_ORIGINS', '*')
+    socketio.init_app(app, 
+                      message_queue=app.config['REDIS_URL'],
+                      cors_allowed_origins=cors_origins,
+                      async_mode='threading')
+    
     # Configure login
     login_manager.login_view = 'auth.login'
     login_manager.login_message = 'Please log in to access this page.'
@@ -62,6 +72,10 @@ def create_app(config_class=Config):
     app.register_blueprint(email.bp)
     app.register_blueprint(admin.bp)
     app.register_blueprint(api.bp)
+    
+    # Register SocketIO event handlers
+    with app.app_context():
+        from app.routes import socketio_events
     
     # User loader
     from app.models.user import User
