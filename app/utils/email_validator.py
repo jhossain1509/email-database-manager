@@ -7,13 +7,81 @@ from flask import current_app
 # Initialize public suffix list
 psl = publicsuffix2.PublicSuffixList()
 
+# Enhanced email validation patterns
+EMAIL_REGEX = re.compile(
+    r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+)
+
+COMMON_DOMAINS = [
+    "gmail.com", "googlemail.com", "yahoo.com", "outlook.com",
+    "hotmail.com", "aol.com", "icloud.com", "msn.com", "live.com",
+    "att.net", "comcast.net", "verizon.net", "cox.net", "bellsouth.net",
+    "sbcglobal.net", "charter.net", "spectrum.net", "optimum.net", "earthlink.net",
+    "frontiernet.net", "centurylink.net", "windstream.net", "suddenlink.net",
+    "mediacomcc.net", "pacbell.net", "ymail.com", "me.com", "mac.com"
+]
+
+COMMON_TLD_TYPO_SUFFIXES = (
+    ".con", ".cim", ".vom", ".cpm", ".comm", ".xom", ".om",
+    ".col", ".clm", ".ner", ".nrt", ".netet", ".neti", ".netbruno"
+)
+
+ROLE_LOCALS = {
+    "admin", "info", "support", "sales", "contact",
+    "postmaster", "abuse", "mailer-daemon",
+    "noreply", "no-reply"
+}
+
+FAKE_LOCALS = {
+    "test", "demo", "none", "na", "unknown", "noemail",
+    "asdf", "qwerty", "sample", "example"
+}
+
+
+def _entropy(s: str) -> float:
+    """Calculate Shannon entropy of a string"""
+    if not s:
+        return 0.0
+    from collections import Counter
+    import math
+    counts = Counter(s)
+    length = len(s)
+    return -sum((count/length) * math.log2(count/length) for count in counts.values())
+
+
+def has_typo_tld(email: str) -> bool:
+    """Check if email has a common TLD typo"""
+    email_lower = email.lower()
+    return any(email_lower.endswith(typo) for typo in COMMON_TLD_TYPO_SUFFIXES)
+
+
+def is_fake_local(email: str) -> bool:
+    """Check if local part is a fake/test email"""
+    local_part = email.split('@')[0].lower()
+    return local_part in FAKE_LOCALS
+
+
 def is_valid_email_syntax(email):
-    """Check if email has valid syntax"""
+    """Check if email has valid syntax with enhanced regex"""
+    # First check with our regex
+    if not EMAIL_REGEX.match(email):
+        return False, "Invalid email format"
+    
+    # Check for TLD typos
+    if has_typo_tld(email):
+        return False, "Common TLD typo detected"
+    
+    # Check for fake local parts
+    if is_fake_local(email):
+        return False, "Fake/test email detected"
+    
+    # Then validate with email_validator library
     try:
         validate_email_lib(email, check_deliverability=False)
         return True, None
     except EmailNotValidError as e:
         return False, str(e)
+
 
 def extract_domain(email):
     """Extract domain from email"""
@@ -35,13 +103,9 @@ def check_dns_mx(domain):
 
 def is_role_based_email(email):
     """Check if email uses role-based local part"""
-    role_prefixes = [
-        'admin', 'info', 'support', 'sales', 'contact', 'help',
-        'webmaster', 'postmaster', 'noreply', 'no-reply', 'abuse'
-    ]
-    
     local_part = email.split('@')[0].lower()
-    return any(local_part.startswith(prefix) for prefix in role_prefixes)
+    return local_part in ROLE_LOCALS or any(local_part.startswith(prefix) for prefix in ROLE_LOCALS)
+
 
 def get_public_suffix(domain):
     """Get the public suffix of a domain"""

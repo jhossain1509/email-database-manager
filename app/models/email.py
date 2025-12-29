@@ -13,6 +13,7 @@ class Email(db.Model):
     is_validated = db.Column(db.Boolean, default=False, nullable=False, index=True)
     is_valid = db.Column(db.Boolean, default=None)
     validation_error = db.Column(db.Text)
+    validation_method = db.Column(db.String(20), index=True)  # 'standard', 'smtp'
     
     # Quality metrics
     quality_score = db.Column(db.Integer)  # 0-100

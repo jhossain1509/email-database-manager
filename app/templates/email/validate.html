@@ -38,12 +38,19 @@
                                 <option value="">-- Select a batch --</option>
                                 {% for batch in batches %}
                                 <option value="{{ batch.id }}">
-                                    {{ batch.name }} ({{ batch.unverified_count }} unverified emails)
+                                    {{ batch.name }} 
+                                    {% if batch.unverified_count > 0 %}
+                                    ({{ batch.unverified_count }} unverified)
+                                    {% endif %}
+                                    {% if batch.standard_validated_count > 0 %}
+                                    {% if batch.unverified_count > 0 %}, {% endif %}
+                                    ({{ batch.standard_validated_count }} for SMTP re-validation)
+                                    {% endif %}
                                 </option>
                                 {% endfor %}
                             </select>
                             <small class="form-text text-muted">
-                                Only batches with unverified emails are shown
+                                Shows batches with unverified emails or emails validated with standard method (for SMTP re-validation)
                             </small>
                         </div>
                         

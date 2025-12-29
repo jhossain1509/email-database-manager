@@ -114,6 +114,7 @@
                                             <span class="badge bg-info domain-count" 
                                                   data-domain="{{ stat.domain }}"
                                                   data-verified="{{ stat.verified_available }}"
+                                                  data-smtp-verified="{{ stat.smtp_verified_available|default(0) }}"
                                                   data-unverified="{{ stat.unverified_available }}"
                                                   data-invalid="{{ stat.invalid_available }}"
                                                   data-all="{{ stat.all_available }}">
@@ -240,6 +241,9 @@ function updateDomainCounts() {
         switch(exportType) {
             case 'verified':
                 count = parseInt(badge.dataset.verified);
+                break;
+            case 'smtp_verified':
+                count = parseInt(badge.dataset.smtpVerified || 0);
                 break;
             case 'unverified':
                 count = parseInt(badge.dataset.unverified);

@@ -588,6 +588,7 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                         email_obj.is_validated = True
                         email_obj.is_valid = is_valid
                         email_obj.quality_score = quality_score
+                        email_obj.validation_method = 'standard'  # Mark as standard validation
                         email_obj.update_rating()  # Calculate and set rating
                         
                         if not is_valid:
