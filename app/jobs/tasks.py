@@ -1030,33 +1030,52 @@ def export_guest_emails_task(self, user_id, batch_id, export_type='all', export_
                 batch_id=batch_id
             )
             
+            # Build filters list based on export_type and rating
+            email_filters = []
+            needs_email_join = False
+            
             # Apply filters based on export_type
             if export_type == 'verified':
                 # Only items that link to validated & valid emails
-                query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
-                    .filter(Email.is_validated.is_(True), Email.is_valid.is_(True))
+                email_filters.extend([
+                    Email.is_validated.is_(True),
+                    Email.is_valid.is_(True)
+                ])
+                needs_email_join = True
             elif export_type == 'smtp_verified':
                 # Only items linked to SMTP validated & valid emails
-                query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
-                    .filter(Email.is_validated.is_(True), Email.is_valid.is_(True), Email.validation_method == 'smtp')
+                email_filters.extend([
+                    Email.is_validated.is_(True),
+                    Email.is_valid.is_(True),
+                    Email.validation_method == 'smtp'
+                ])
+                needs_email_join = True
             elif export_type == 'unverified':
                 # Items linked to unvalidated emails
-                query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
-                    .filter(Email.is_validated.is_(False))
+                email_filters.append(Email.is_validated.is_(False))
+                needs_email_join = True
             elif export_type == 'invalid':
                 # Items linked to validated but invalid emails
-                query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
-                    .filter(Email.is_validated.is_(True), Email.is_valid.is_(False))
+                email_filters.extend([
+                    Email.is_validated.is_(True),
+                    Email.is_valid.is_(False)
+                ])
+                needs_email_join = True
             elif export_type == 'rejected':
                 # Items with result=rejected
                 query = query.filter(GuestEmailItem.result == 'rejected')
-            # 'all' exports everything
+            # 'all' exports everything - might still need join for rating filter
             
             # Apply rating filter if specified
-            if rating_filter and len(rating_filter) > 0:
-                if export_type != 'rejected':  # Rejected emails don't have ratings
-                    query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)\
-                        .filter(Email.rating.in_(rating_filter))
+            if rating_filter and len(rating_filter) > 0 and export_type != 'rejected':
+                email_filters.append(Email.rating.in_(rating_filter))
+                needs_email_join = True
+            
+            # Apply the join and filters if needed
+            if needs_email_join:
+                query = query.join(Email, GuestEmailItem.matched_email_id == Email.id)
+                if email_filters:
+                    query = query.filter(*email_filters)
             
             # Apply random limit if specified
             if random_limit and random_limit > 0:

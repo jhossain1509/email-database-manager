@@ -493,6 +493,9 @@ def export():
                 verified = domain_query.join(GuestEmailItem.matched_email, isouter=False).filter(
                     Email.is_validated == True, Email.is_valid == True
                 ).count()
+                smtp_verified = domain_query.join(GuestEmailItem.matched_email, isouter=False).filter(
+                    Email.is_validated == True, Email.is_valid == True, Email.validation_method == 'smtp'
+                ).count()
                 unverified = domain_query.join(GuestEmailItem.matched_email, isouter=False).filter(
                     Email.is_validated == False
                 ).count()
@@ -507,6 +510,8 @@ def export():
                     'total': total,
                     'verified': verified,
                     'verified_available': verified,
+                    'smtp_verified': smtp_verified,
+                    'smtp_verified_available': smtp_verified,
                     'unverified': unverified,
                     'unverified_available': unverified,
                     'invalid': invalid,
@@ -524,6 +529,9 @@ def export():
             mixed_verified = mixed_query.join(GuestEmailItem.matched_email, isouter=False).filter(
                 Email.is_validated == True, Email.is_valid == True
             ).count()
+            mixed_smtp_verified = mixed_query.join(GuestEmailItem.matched_email, isouter=False).filter(
+                Email.is_validated == True, Email.is_valid == True, Email.validation_method == 'smtp'
+            ).count()
             mixed_unverified = mixed_query.join(GuestEmailItem.matched_email, isouter=False).filter(
                 Email.is_validated == False
             ).count()
@@ -536,6 +544,8 @@ def export():
                 'total': mixed_total,
                 'verified': mixed_verified,
                 'verified_available': mixed_verified,
+                'smtp_verified': mixed_smtp_verified,
+                'smtp_verified_available': mixed_smtp_verified,
                 'unverified': mixed_unverified,
                 'unverified_available': mixed_unverified,
                 'invalid': mixed_invalid,
