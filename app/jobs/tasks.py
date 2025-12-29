@@ -575,6 +575,54 @@ def validate_emails_task(self, batch_id, user_id, check_dns=False, check_role=Fa
                 # Standard validation (DNS/MX)
                 for idx, email_obj in enumerate(emails):
                     try:
+                        # Check for pause/cancel requests
+                        control_action = job.check_control_flags()
+                        if control_action == 'cancel':
+                            job.status = 'cancelled'
+                            job.completed_at = datetime.utcnow()
+                            job.result_message = f'Validation cancelled by user. Processed {idx}/{job.total} emails.'
+                            db.session.commit()
+                            logger.info(f"Job {job.job_id} cancelled by user")
+                            return
+                        elif control_action == 'pause':
+                            job.status = 'paused'
+                            job.result_message = f'Validation paused. Processed {idx}/{job.total} emails so far.'
+                            db.session.commit()
+                            logger.info(f"Job {job.job_id} paused at {idx}/{job.total}")
+                            
+                            # Emit pause status
+                            emit_job_progress(job.job_id, {
+                                'status': 'paused',
+                                'current': idx,
+                                'total': job.total,
+                                'percent': job.progress_percent,
+                                'message': 'Validation paused'
+                            })
+                            
+                            # Wait loop while paused
+                            while job.pause_requested:
+                                import time
+                                time.sleep(2)
+                                db.session.refresh(job)
+                                
+                                # Check if cancelled while paused
+                                if job.cancel_requested:
+                                    job.status = 'cancelled'
+                                    job.completed_at = datetime.utcnow()
+                                    db.session.commit()
+                                    logger.info(f"Job {job.job_id} cancelled while paused")
+                                    return
+                            
+                            # Resumed
+                            logger.info(f"Job {job.job_id} resumed")
+                            emit_job_progress(job.job_id, {
+                                'status': 'running',
+                                'current': idx,
+                                'total': job.total,
+                                'percent': job.progress_percent,
+                                'message': 'Validation resumed'
+                            })
+                        
                         # Enhanced validation with quality scoring
                         is_valid, error_type, error_message, quality_score, details = validate_email_enhanced(
                             email_obj.email,

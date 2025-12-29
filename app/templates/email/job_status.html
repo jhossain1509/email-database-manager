@@ -14,7 +14,7 @@
         <div class="card-header"><h5>Job: <span id="job-type">{{ job.job_type|title }}</span></h5></div>
         <div class="card-body">
             <p><strong>Status:</strong> 
-                <span id="job-status" class="badge bg-{{ 'success' if job.status == 'completed' else 'primary' if job.status == 'running' else 'danger' if job.status == 'failed' else 'warning' }}">
+                <span id="job-status" class="badge bg-{{ 'success' if job.status == 'completed' else 'primary' if job.status == 'running' else 'warning' if job.status == 'paused' else 'danger' if job.status == 'failed' else 'secondary' if job.status == 'cancelled' else 'warning' }}">
                     {{ job.status|upper }}
                 </span>
                 <span id="connection-status" class="badge bg-secondary ms-2" style="display: none;">
@@ -32,6 +32,24 @@
                     <span id="progress-bar-text">{{ job.progress_percent|round(1) }}%</span>
                 </div>
             </div>
+            
+            <!-- Job Control Buttons -->
+            {% if job.status in ['running', 'paused'] %}
+            <div class="btn-group mb-3" role="group" id="job-controls">
+                {% if job.status == 'running' %}
+                <button type="button" class="btn btn-warning" id="pause-btn" onclick="pauseJob()">
+                    <i class="bi bi-pause-fill"></i> Pause
+                </button>
+                {% elif job.status == 'paused' %}
+                <button type="button" class="btn btn-success" id="resume-btn" onclick="resumeJob()">
+                    <i class="bi bi-play-fill"></i> Resume
+                </button>
+                {% endif %}
+                <button type="button" class="btn btn-danger" id="cancel-btn" onclick="cancelJob()">
+                    <i class="bi bi-x-circle-fill"></i> Cancel
+                </button>
+            </div>
+            {% endif %}
             
             <div id="live-message" class="alert alert-info" style="display: none;">
                 <i class="bi bi-info-circle"></i> <span id="message-text"></span>
@@ -81,6 +99,78 @@
 <script>
     const jobId = '{{ job.job_id }}';
     const jobStatus = '{{ job.status }}';
+    
+    // Job control functions
+    async function pauseJob() {
+        try {
+            const response = await fetch(`/api/job/${jobId}/pause`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+            const data = await response.json();
+            if (data.success) {
+                document.getElementById('pause-btn').disabled = true;
+                document.getElementById('message-text').textContent = 'Pause requested... waiting for safe pause point';
+                document.getElementById('live-message').style.display = 'block';
+            } else {
+                alert('Failed to pause job: ' + data.error);
+            }
+        } catch (error) {
+            console.error('Error pausing job:', error);
+            alert('Error pausing job');
+        }
+    }
+    
+    async function resumeJob() {
+        try {
+            const response = await fetch(`/api/job/${jobId}/resume`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+            const data = await response.json();
+            if (data.success) {
+                document.getElementById('resume-btn').disabled = true;
+                document.getElementById('message-text').textContent = 'Resuming...';
+                document.getElementById('live-message').style.display = 'block';
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                alert('Failed to resume job: ' + data.error);
+            }
+        } catch (error) {
+            console.error('Error resuming job:', error);
+            alert('Error resuming job');
+        }
+    }
+    
+    async function cancelJob() {
+        if (!confirm('Are you sure you want to cancel this job? This action cannot be undone.')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/job/${jobId}/cancel`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+            const data = await response.json();
+            if (data.success) {
+                document.getElementById('cancel-btn').disabled = true;
+                document.getElementById('message-text').textContent = 'Cancel requested...';
+                document.getElementById('live-message').style.display = 'block';
+            } else {
+                alert('Failed to cancel job: ' + data.error);
+            }
+        } catch (error) {
+            console.error('Error cancelling job:', error);
+            alert('Error cancelling job');
+        }
+    }
     
     // Connect to Socket.IO server
     const socket = io('/jobs', {
@@ -135,8 +225,37 @@
             statusBadge.className = 'badge bg-' + (
                 data.status === 'completed' ? 'success' :
                 data.status === 'running' ? 'primary' :
+                data.status === 'paused' ? 'warning' :
+                data.status === 'cancelled' ? 'secondary' :
                 data.status === 'failed' ? 'danger' : 'warning'
             );
+            
+            // Update control buttons based on status
+            const jobControls = document.getElementById('job-controls');
+            if (jobControls) {
+                if (data.status === 'running') {
+                    jobControls.innerHTML = `
+                        <button type="button" class="btn btn-warning" id="pause-btn" onclick="pauseJob()">
+                            <i class="bi bi-pause-fill"></i> Pause
+                        </button>
+                        <button type="button" class="btn btn-danger" id="cancel-btn" onclick="cancelJob()">
+                            <i class="bi bi-x-circle-fill"></i> Cancel
+                        </button>
+                    `;
+                } else if (data.status === 'paused') {
+                    jobControls.innerHTML = `
+                        <button type="button" class="btn btn-success" id="resume-btn" onclick="resumeJob()">
+                            <i class="bi bi-play-fill"></i> Resume
+                        </button>
+                        <button type="button" class="btn btn-danger" id="cancel-btn" onclick="cancelJob()">
+                            <i class="bi bi-x-circle-fill"></i> Cancel
+                        </button>
+                    `;
+                } else {
+                    // Hide controls for completed/failed/cancelled
+                    jobControls.style.display = 'none';
+                }
+            }
             
             // Show live message
             if (data.message) {
@@ -145,7 +264,7 @@
             }
             
             // If completed, reload page to show final result
-            if (data.status === 'completed' || data.status === 'failed') {
+            if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
                 setTimeout(() => location.reload(), 2000);
             }
         }

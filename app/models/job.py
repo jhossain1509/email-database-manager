@@ -11,7 +11,11 @@ class Job(db.Model):
     
     # Status tracking
     status = db.Column(db.String(50), default='pending', nullable=False, index=True)
-    # Status: pending, running, completed, failed
+    # Status: pending, running, paused, completed, failed, cancelled
+    
+    # Control flags
+    pause_requested = db.Column(db.Boolean, default=False, nullable=False)
+    cancel_requested = db.Column(db.Boolean, default=False, nullable=False)
     
     # Progress
     total = db.Column(db.Integer, default=0, nullable=False)
@@ -58,6 +62,32 @@ class Job(db.Model):
         self.completed_at = datetime.utcnow()
         self.error_message = error_message
         db.session.commit()
+    
+    def pause(self):
+        """Request job to pause"""
+        self.pause_requested = True
+        db.session.commit()
+    
+    def resume(self):
+        """Resume a paused job"""
+        self.pause_requested = False
+        if self.status == 'paused':
+            self.status = 'running'
+        db.session.commit()
+    
+    def cancel(self):
+        """Request job to cancel"""
+        self.cancel_requested = True
+        db.session.commit()
+    
+    def check_control_flags(self):
+        """Check if job should pause or cancel. Returns 'pause', 'cancel', or None"""
+        db.session.refresh(self)
+        if self.cancel_requested:
+            return 'cancel'
+        if self.pause_requested:
+            return 'pause'
+        return None
     
     def __repr__(self):
         return f'<Job {self.job_type} - {self.status}>'

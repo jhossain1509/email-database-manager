@@ -156,3 +156,94 @@ def export_domain_stats():
         'batch_id': batch_id,
         'export_type': export_type
     })
+
+@bp.route('/job/<job_id>/pause', methods=['POST'])
+@login_required
+def pause_job(job_id):
+    """Pause a running job"""
+    job = Job.query.filter_by(job_id=job_id).first_or_404()
+    
+    # Check access
+    if not current_user.is_admin() and job.user_id != current_user.id:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    # Only running jobs can be paused
+    if job.status != 'running':
+        return jsonify({'error': f'Cannot pause job with status: {job.status}'}), 400
+    
+    job.pause()
+    
+    return jsonify({
+        'success': True,
+        'message': 'Pause request sent',
+        'job_id': job_id,
+        'status': job.status
+    })
+
+@bp.route('/job/<job_id>/resume', methods=['POST'])
+@login_required
+def resume_job(job_id):
+    """Resume a paused job"""
+    job = Job.query.filter_by(job_id=job_id).first_or_404()
+    
+    # Check access
+    if not current_user.is_admin() and job.user_id != current_user.id:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    # Only paused jobs can be resumed
+    if job.status != 'paused':
+        return jsonify({'error': f'Cannot resume job with status: {job.status}'}), 400
+    
+    job.resume()
+    
+    return jsonify({
+        'success': True,
+        'message': 'Job resumed',
+        'job_id': job_id,
+        'status': job.status
+    })
+
+@bp.route('/job/<job_id>/cancel', methods=['POST'])
+@login_required
+def cancel_job(job_id):
+    """Cancel a running or paused job"""
+    job = Job.query.filter_by(job_id=job_id).first_or_404()
+    
+    # Check access
+    if not current_user.is_admin() and job.user_id != current_user.id:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    # Can only cancel running or paused jobs
+    if job.status not in ['running', 'paused']:
+        return jsonify({'error': f'Cannot cancel job with status: {job.status}'}), 400
+    
+    job.cancel()
+    
+    return jsonify({
+        'success': True,
+        'message': 'Cancel request sent',
+        'job_id': job_id,
+        'status': job.status
+    })
+
+@bp.route('/job/<job_id>/status')
+@login_required
+def get_job_status(job_id):
+    """Get current job status"""
+    job = Job.query.filter_by(job_id=job_id).first_or_404()
+    
+    # Check access
+    if not current_user.is_admin() and job.user_id != current_user.id:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    return jsonify({
+        'job_id': job.job_id,
+        'status': job.status,
+        'progress_percent': job.progress_percent,
+        'processed': job.processed,
+        'total': job.total,
+        'errors': job.errors,
+        'pause_requested': job.pause_requested,
+        'cancel_requested': job.cancel_requested
+    })
+
